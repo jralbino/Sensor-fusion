@@ -5,10 +5,11 @@ __pycache__/
 .env
 
 # Data & Models (IMPORTANTE)
-data/
-models/
-output/
-runs/
+Vision/data/
+Vision/models/
+Vision/output/
+Vision/runs/
+venv/
 
 # IDE
 .vscode/
