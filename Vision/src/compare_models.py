@@ -6,7 +6,7 @@ from detectors.object_detector import ObjectDetector
 def run_comparison(image_folder, output_folder):
     # Definir los modelos a comparar
     # 'n' es nano (rápido), 's' small, 'm' medium, 'l' large, 'x' extra large
-    models_to_test = ['yolo11l.pt', 'rtdetr-l.pt'] 
+    models_to_test = ['models/yolo11l.pt', 'models/rtdetr-l.pt'] 
     
     detectors = [ObjectDetector(m) for m in models_to_test]
     

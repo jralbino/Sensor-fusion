@@ -3,7 +3,7 @@ import time
 import torch
 
 class ObjectDetector:
-    def __init__(self, model_path='yolo11l.pt', conf=0.5, iou=0.45, device=None):
+    def __init__(self, model_path='models/yolo11l.pt', conf=0.5, iou=0.45, device=None):
         """
         Args:
             model_path (str): Ruta al modelo .pt
