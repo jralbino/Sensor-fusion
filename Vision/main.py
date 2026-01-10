@@ -1,65 +1,109 @@
 import sys
+import yaml
 from pathlib import Path
 
 # Añadimos 'src' al path
-sys.path.append('Vision/src')
+sys.path.append('src')
 
 from predictor import BatchPredictor
 from visualizer import ResultVisualizer
+from benchmark import ModelBenchmark
+
+def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
+    """
+    Crea un archivo YAML temporal que apunta solo a las primeras 'limit' imágenes.
+    CORREGIDO: Asegura que exista la key 'train' para evitar error de Ultralytics.
+    """
+    if limit is None:
+        # Si usamos el yaml base, asegurarnos que tenga train. 
+        # Si falla aquí, edita bdd_coco_val.yaml y descomenta 'train'.
+        return base_yaml 
+
+    print(f"\n✂️ Creando configuración temporal para {limit} imágenes...")
+    
+    # 1. Obtener la lista de archivos
+    img_paths = sorted(list(Path(images_dir).glob("*.jpg")))[:limit]
+    
+    # Convertir a rutas absolutas (CRÍTICO para que YOLO no se pierda)
+    img_paths = [str(p.resolve()) for p in img_paths]
+    
+    # 2. Crear archivo .txt con la lista de imágenes
+    subset_txt_path = Path("config/temp_val_subset.txt")
+    # Asegurar que el directorio config existe
+    subset_txt_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(subset_txt_path, 'w') as f:
+        f.write('\n'.join(img_paths))
+        
+    # 3. Leer el YAML base
+    with open(base_yaml, 'r') as f:
+        config = yaml.safe_load(f) or {} # Manejar si está vacío
+        
+    # --- FIX: INYECTAR CLAVES OBLIGATORIAS ---
+    abs_txt_path = str(subset_txt_path.absolute())
+    
+    config['val'] = abs_txt_path
+    
+    # Si 'train' no existe, lo rellenamos con la misma ruta para que YOLO no se queje
+    if 'train' not in config:
+        config['train'] = abs_txt_path 
+    
+    # 4. Guardar el nuevo YAML temporal
+    with open(output_yaml_path, 'w') as f:
+        yaml.dump(config, f)
+        
+    return output_yaml_path
 
 def main():
-    # --- 1. CONFIGURACIÓN DEL ENTORNO ---
-    # Rutas relativas desde la carpeta 'Vision/'
-    IMAGES_DIR = "Vision/data/raw/bdd100k/images/100k/val"
-    PREDICTIONS_DIR = "Vision/output/predictions"
-    VIDEOS_DIR = "Vision/output/videos"
-    MODELS_DIR = "Vision/models"  # Carpeta donde moviste los .pt
+    # --- 1. CONFIGURACIÓN ---
+    IMAGES_DIR = "data/raw/bdd100k/images/100k/val"
+    PREDICTIONS_DIR = "output/predictions"
+    VIDEOS_DIR = "output/videos"
+    MODELS_DIR = "models"
+    
+    # YAML Original (Dataset Completo)
+    BASE_YAML = "config/bdd_coco_val.yaml"
+    
+    # Límite de prueba (Cámbialo a None para correr todo)
+    LIMIT = 50 
 
-    # --- 2. CONFIGURACIÓN DE LOS MODELOS A COMPARAR ---
-    # Aquí defines tus contendientes. 
-    # Formato: (Nombre_Para_Video, Nombre_Archivo_Modelo)
     models_to_run = [
         ("YOLO11-X", f"{MODELS_DIR}/yolo11x.pt"),
         ("RTDETR-L", f"{MODELS_DIR}/rtdetr-l.pt")
     ]
 
-    # --- 3. FASE DE INFERENCIA (GENERAR JSONs) ---
-    print("--- FASE 1: GENERACIÓN DE PREDICCIONES ---")
-    
+    # --- FASE 1: INFERENCIA (JSONs) ---
+    print(f"\n🎬 --- FASE 1: PREDICCIONES (Límite: {LIMIT}) ---")
     predictor = BatchPredictor(images_dir=IMAGES_DIR, output_dir=PREDICTIONS_DIR)
-    
     generated_jsons = []
     
     for name, model_file in models_to_run:
-        # Aquí controlas el 'limit'. 
-        # Pon limit=50 para probar rápido, o limit=None para todo el set.
         json_path = predictor.run_inference(
-            model_name=name,
-            model_path=model_file,
-            conf=0.50,    # Umbral de confianza
-            limit=50      # <--- ¡CAMBIA ESTO A None CUANDO ESTÉS LISTO!
+            model_name=name, model_path=model_file,
+            conf=0.50, limit=LIMIT
         )
-        
-        if json_path:
-            generated_jsons.append((name, json_path))
+        if json_path: generated_jsons.append((name, json_path))
 
-    # --- 4. FASE DE VISUALIZACIÓN (GENERAR VIDEO) ---
-    if not generated_jsons:
-        print("No se generaron predicciones. Abortando video.")
-        return
+    # --- FASE 2: VIDEO ---
+    if generated_jsons:
+        print("\n🎥 --- FASE 2: VIDEO COMPARATIVO ---")
+        viz = ResultVisualizer(images_dir=IMAGES_DIR, output_dir=VIDEOS_DIR)
+        video_name = f"comparison_limit{LIMIT}.mp4" if LIMIT else "comparison_full.mp4"
+        viz.generate_video(generated_jsons, video_name, fps=5)
 
-    print("\n--- FASE 2: VISUALIZACIÓN Y VIDEO ---")
+    # --- FASE 3: BENCHMARK (Con el mismo límite) ---
+    print(f"\n📊 --- FASE 3: BENCHMARK (Sobre {LIMIT if LIMIT else 'todas'} las imágenes) ---")
     
-    viz = ResultVisualizer(images_dir=IMAGES_DIR, output_dir=VIDEOS_DIR)
+    # AQUI ESTÁ EL CAMBIO CLAVE:
+    # Generamos un YAML que apunte solo a las imágenes del LIMIT
+    temp_yaml = "config/temp_benchmark.yaml"
+    active_yaml = create_subset_yaml(BASE_YAML, IMAGES_DIR, LIMIT, temp_yaml)
     
-    # Nombre del video automático basado en los modelos
-    video_name = "vs".join([m[0] for m in generated_jsons]) + "_comparison.mp4"
+    benchmarker = ModelBenchmark(data_yaml=active_yaml)
+    benchmarker.run(models_to_run)
     
-    viz.generate_video(
-        json_files=generated_jsons, 
-        output_filename=video_name,
-        fps=5
-    )
+    # Limpieza opcional (borrar temp)
+    # import os; os.remove(temp_yaml)
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,32 @@
+# Configuración para validar modelos COCO en dataset BDD100K
+path: ../data/raw/bdd100k  # Root dir (Relativo a donde ejecutes el script, o usa ruta absoluta)
+
+# Rutas relativas a 'path'
+# IMPORTANTE: YOLO busca los labels automáticamente reemplazando /images/ por /labels/
+# Asegúrate que tu estructura sea:
+# .../bdd100k/images/100k/val
+# .../bdd100k/labels/coco_format/val  <-- (Aquí deben estar los txt generados)
+# 
+# Si YOLO no los encuentra, te avisará. Un truco es tener images y labels en carpetas "hermanas".
+
+val: images/100k/val
+# train: (No necesario para validación pura)
+
+# Classes - Usamos el estándar COCO 80 clases
+names:
+  0: person
+  1: bicycle
+  2: car
+  3: motorcycle
+  4: airplane
+  5: bus
+  6: train
+  7: truck
+  8: boat
+  9: traffic light
+  10: fire hydrant
+  11: stop sign
+  # ... el resto no es crítico definirlo si no aparece en el GT, 
+  # pero YOLO espera 80 nombres si el modelo tiene 80 clases.
+  # Ultralytics rellena automático si usas el modelo pre-entrenado, 
+  # pero es bueno definir las que mapeamos.
