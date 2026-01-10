@@ -8,6 +8,7 @@ sys.path.append('src')
 from predictor import BatchPredictor
 from visualizer import ResultVisualizer
 from benchmark import ModelBenchmark
+from lanes.yolop_detector import YOLOPDetector
 
 def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
     """
@@ -84,12 +85,32 @@ def main():
         )
         if json_path: generated_jsons.append((name, json_path))
 
-    # --- FASE 2: VIDEO ---
+    # --- FASE 2: VIDEO COMPARATIVO (CON CARRILES) ---
     if generated_jsons:
-        print("\n🎥 --- FASE 2: VIDEO COMPARATIVO ---")
+        print("\n🎥 --- FASE 2: VIDEO COMPARATIVO (SENSOR FUSION) ---")
+        
+        # 1. Configuración de Visualización de Carriles (CONTROL AQUÍ)
+        LANE_OPTIONS = {
+            'show_drivable': False,      # ¿Mostrar área verde de conducción?
+            'show_lanes': False,        # ¿Mostrar máscara roja sólida? (Lo apago para ver mejor los puntos)
+            'show_lane_points': True    # ¿Mostrar contornos/puntos conectados? (NUEVO)
+        }
+        
+        print(f"   Iniciando YOLOP... Config: {LANE_OPTIONS}")
+        lane_model = YOLOPDetector()
+        
         viz = ResultVisualizer(images_dir=IMAGES_DIR, output_dir=VIDEOS_DIR)
-        video_name = f"comparison_limit{LIMIT}.mp4" if LIMIT else "comparison_full.mp4"
-        viz.generate_video(generated_jsons, video_name, fps=5)
+        
+        # Nombre del video indicando configuración
+        video_name = f"fusion_points_{'ON' if LANE_OPTIONS['show_lane_points'] else 'OFF'}.mp4"
+        
+        viz.generate_video(
+            generated_jsons, 
+            video_name, 
+            fps=5,
+            lane_detector=lane_model,
+            lane_config=LANE_OPTIONS  # <--- Pasamos la configuración
+        )
 
     # --- FASE 3: BENCHMARK (Con el mismo límite) ---
     print(f"\n📊 --- FASE 3: BENCHMARK (Sobre {LIMIT if LIMIT else 'todas'} las imágenes) ---")

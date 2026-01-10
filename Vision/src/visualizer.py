@@ -20,7 +20,7 @@ class ResultVisualizer:
             5: "Bus", 7: "Truck", 9: "Traffic Light", 11: "Stop Sign"
         }
         
-        # Paleta de Colores
+        # Paleta de Colores BGR
         self.colors = {
             0: (0, 0, 255),      # Person -> Rojo
             1: (0, 165, 255),    # Bicycle -> Naranja
@@ -44,10 +44,10 @@ class ResultVisualizer:
         return lookup, image_names, meta
 
     def _draw_frame(self, img, result_entry, model_name):
-        """Dibuja las detecciones sobre un frame."""
+        """Dibuja las cajas de detección sobre un frame."""
         canvas = img.copy()
         
-        # Etiqueta "No Data" si no hay resultados
+        # Etiqueta "No Data" si no hay resultados para esta imagen
         if result_entry is None:
             cv2.putText(canvas, f"{model_name} (No Data)", (20, 40), 
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
@@ -56,21 +56,25 @@ class ResultVisualizer:
         # Dibujar Detecciones
         for det in result_entry['detections']:
             cls_id = det['class_id']
-            # --- AQUÍ MOSTRAMOS TODAS LAS CLASES (Sin filtros) ---
+            # Mostrar todas las clases definidas en self.classes
             if cls_id in self.classes:
                 x1, y1, x2, y2 = map(int, det['bbox'])
                 conf = det['confidence']
                 label = f"{self.classes[cls_id]} {conf:.2f}"
                 color = self.colors.get(cls_id, (128,128,128))
                 
-                # Caja y Texto
+                # Caja
                 cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
+                
+                # Fondo del texto (para legibilidad)
                 (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                 cv2.rectangle(canvas, (x1, y1 - 20), (x1 + w, y1), color, -1)
+                
+                # Texto
                 cv2.putText(canvas, label, (x1, y1 - 5), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1)
 
-        # Info del Modelo (Overlay)
+        # Info del Modelo (Overlay en esquina superior)
         latency = result_entry.get('inference_ms', 0)
         info = f"{model_name} | {latency}ms"
         cv2.rectangle(canvas, (0, 0), (300, 40), (0, 0, 0), -1)
@@ -78,38 +82,24 @@ class ResultVisualizer:
         
         return canvas
 
-    def generate_video(self, json_files, output_filename, fps=5):
-        """
-        Genera el video comparativo.
-        
-        Args:
-            json_files: Lista de tuplas [('NombreModelo', 'ruta.json')]
-            output_filename: Nombre del archivo de salida (ej: 'video_final.mp4')
-            fps: Frames por segundo.
-        """
-        # 1. Cargar datos
+    def generate_video(self, json_files, output_filename, fps=5, lane_detector=None, lane_config=None):
+        # ... (Configuración inicial igual que antes) ...
+        if lane_config is None:
+            lane_config = {'show_drivable': True, 'show_lanes': True, 'show_lane_points': False}
+
+        # Cargar datos (igual que antes)
         model_data = []
         all_images = set()
-        
         for name, path in json_files:
-            if not os.path.exists(path):
-                print(f"⚠️ Archivo no encontrado: {path}")
-                continue
+            if not os.path.exists(path): continue
             lookup, names, meta = self._load_predictions(path)
             model_data.append({"name": name, "lookup": lookup})
             all_images.update(names)
             
         sorted_images = sorted(list(all_images))
-        if not sorted_images:
-            print("❌ No hay imágenes para procesar.")
-            return
+        if not sorted_images: return
 
-        # 2. Configurar Video Writer
         first_path = self.images_dir / sorted_images[0]
-        if not first_path.exists():
-            print(f"❌ Error: No encuentro imágenes en {self.images_dir}")
-            return
-            
         sample_img = cv2.imread(str(first_path))
         h, w, _ = sample_img.shape
         sbs_width = w * len(model_data)
@@ -118,22 +108,47 @@ class ResultVisualizer:
         writer = cv2.VideoWriter(str(save_path), cv2.VideoWriter_fourcc(*'mp4v'), fps, (sbs_width, h))
         
         print(f"🎥 Generando video: {save_path}")
-        print(f"Frames a procesar: {len(sorted_images)}")
 
-        # 3. Loop de generación
+        # LOOP PRINCIPAL
         for img_name in tqdm(sorted_images):
             full_path = self.images_dir / img_name
-            if not full_path.exists(): continue
-            
             original = cv2.imread(str(full_path))
             if original is None: continue
             
-            frames = []
+            background_frame = original
+            lane_info_text = ""  # Texto para guardar la latencia
+
+            # --- DETECCIÓN DE CARRILES (ON-THE-FLY) ---
+            if lane_detector:
+                # Ahora recibimos TUPLA: (imagen, latencia)
+                background_frame, lane_ms = lane_detector.detect(
+                    original, 
+                    show_drivable=lane_config.get('show_drivable', True),
+                    show_lanes=lane_config.get('show_lanes', True),
+                    show_lane_points=lane_config.get('show_lane_points', False)
+                )
+                lane_info_text = f"YOLOP: {lane_ms:.1f}ms" # Preparamos el texto
+
+            frames_row = []
             for m in model_data:
                 entry = m["lookup"].get(img_name)
-                frames.append(self._draw_frame(original, entry, m["name"]))
                 
-            sbs_frame = np.hstack(frames)
+                # Obtenemos el frame con las cajas de YOLO
+                frame_with_boxes = self._draw_frame(background_frame, entry, m["name"])
+                
+                # --- PINTAMOS LA LATENCIA DE YOLOP ---
+                # Lo hacemos AQUÍ para que aparezca en cada panel del video side-by-side
+                if lane_info_text:
+                    # Fondo negro pequeño debajo de la etiqueta del modelo principal
+                    # La etiqueta principal ocupa (0,0) a (300,40)
+                    # Pondremos esta de (0,45) a (250,75)
+                    cv2.rectangle(frame_with_boxes, (0, 45), (250, 75), (0, 0, 0), -1)
+                    cv2.putText(frame_with_boxes, lane_info_text, (10, 65), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1) # Texto Amarillo/Cyan
+                
+                frames_row.append(frame_with_boxes)
+                
+            sbs_frame = np.hstack(frames_row)
             writer.write(sbs_frame)
             
         writer.release()
