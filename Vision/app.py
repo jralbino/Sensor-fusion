@@ -20,7 +20,7 @@ from lanes.segformer_detector import SegFormerDetector
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Sensor Fusion Studio", layout="wide", page_icon="🚗")
-st.title("🚗 Sensor Fusion: Object & Lane Detection Comparison")
+st.title("🚗 Vision: Object & Lane Detection Comparison")
 
 # --- FUNCIONES DE UTILIDAD ---
 
