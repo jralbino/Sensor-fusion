@@ -27,9 +27,13 @@ class PolyRegression(nn.Module):
         return self.model(x)
 
 class PolyLaneNetDetector:
-    def __init__(self, model_path="Vision/models/model_2305.pt", device='cuda'):
+    def __init__(self, model_path=None, device='cuda'):
+        # FIX DE PATH
+        if model_path is None:
+             model_path = "models/model_2305.pt"
+             
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
-        print(f"📉 Cargando PolyLaneNet (Debug Mode) desde {model_path}...")
+        print(f"📉 Cargando PolyLaneNet desde {model_path}...")        
         
         self.input_width = 640
         self.input_height = 360
@@ -40,7 +44,8 @@ class PolyLaneNetDetector:
         
         path = Path(model_path)
         if not path.exists():
-            path = Path("Vision/models") / path.name
+            print("Error path model")
+            #path = Path("Vision/models") / path.name
         
         checkpoint = torch.load(path, map_location=self.device)
         if isinstance(checkpoint, dict):

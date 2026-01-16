@@ -44,9 +44,16 @@ class ParsingNet(nn.Module):
 
 # --- DETECTOR CON CARGA AGRESIVA ---
 class UFLDDetector:
-    def __init__(self, model_path="models/tusimple_18.pth", device='cuda'):
+    def __init__(self, model_path=None, device='cuda'): # model_path opcional
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
-        print(f"⚡ Cargando UFLD (Force Feed) desde {model_path}...")
+        
+        # FIX DE PATH
+        if model_path is None:
+            # Si no se pasa, intenta buscarlo automáticamente o lanza error
+            # Aquí asumimos que app.py SIEMPRE lo pasa, pero por seguridad:
+            model_path = "models/tusimple_18.pth"
+            
+        print(f"⚡ Cargando UFLD desde {model_path}...")        
         
         self.input_width = 800
         self.input_height = 288

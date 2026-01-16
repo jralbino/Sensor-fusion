@@ -7,8 +7,8 @@ class ObjectDetector:
         """
         Args:
             model_path (str): Ruta al modelo .pt
-            conf (float): Confidence Threshold. Detecciones abajo de esto se ignoran.
-            iou (float): NMS Threshold. Controla qué tanto se pueden solapar las cajas.
+            conf (float): Confidence Threshold.
+            iou (float): NMS Threshold.
             device (str): 'cuda' o 'cpu'.
         """
         self.model_path = model_path
@@ -36,32 +36,36 @@ class ObjectDetector:
             "device": self.device
         }
 
-    def detect(self, image):
+    def detect(self, image, classes=None):  # <--- AQUÍ ESTABA EL ERROR (Faltaba classes=None)
         """
         Retorna:
-            detections (list): Lista de dicts con formato {'class': str, 'conf': float, 'bbox': [x1,y1,x2,y2]}
+            detections (list): Lista de dicts
             plot (numpy array): Imagen pintada
             stats (dict): Tiempos de inferencia
+            
+        Args:
+            image (numpy array): Imagen de entrada
+            classes (list[int], optional): Lista de IDs de clases a detectar (ej: [0, 2]). 
         """
         start_time = time.time()
         
-        # Inferencia con parámetros explícitos
+        # Inferencia con parámetros explícitos y filtro de clases
         results = self.model.predict(
             source=image, 
             conf=self.conf, 
             iou=self.iou,
             device=self.device, 
-            verbose=False
-        )[0] # Tomamos el primer resultado (batch size 1)
+            verbose=False,
+            classes=classes  # <--- ESTO ES LO QUE YOLO NECESITA PARA FILTRAR
+        )[0] 
         
         end_time = time.time()
         
         # Procesar resultados para JSON
         parsed_detections = []
-        names = results.names # Diccionario de nombres de clases {0: 'person', ...}
+        names = results.names 
         
         for box in results.boxes:
-            # Coordenadas xyxy (pixels absolutos)
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             confidence = float(box.conf[0])
             cls_id = int(box.cls[0])
@@ -71,7 +75,7 @@ class ObjectDetector:
                 "class_id": cls_id,
                 "class_name": cls_name,
                 "confidence": round(confidence, 4),
-                "bbox": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)] # x1, y1, x2, y2
+                "bbox": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)]
             })
 
         stats = {

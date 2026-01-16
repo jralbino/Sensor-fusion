@@ -3,11 +3,12 @@ import cv2
 import numpy as np
 import torchvision.transforms as transforms
 import time
+import torch.nn.functional as F
 
 class YOLOPDetector:
     def __init__(self, device=None):
         """
-        Detector YOLOP con vectorización de líneas (Polígonos simplificados).
+        Detector YOLOP con lógica corregida (Argmax + Filtrado de Bordes).
         """
         self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"🛣️ Cargando YOLOP en {self.device}...")
@@ -26,12 +27,8 @@ class YOLOPDetector:
         ])
         self.img_size = 640
 
-    def detect(self, img_bgr, show_drivable=True, show_lanes=False, show_lane_points=True):
-        """
-        Retorna la imagen procesada y la latencia.
-        """
+    def detect(self, img_bgr, show_drivable=True, show_lanes=True, show_lane_points=True):
         t_start = time.time()
-
         h_orig, w_orig, _ = img_bgr.shape
         
         # 1. Preproceso
@@ -43,55 +40,65 @@ class YOLOPDetector:
         with torch.no_grad():
             _, da_seg_out, ll_seg_out = self.model(input_tensor)
 
-        # 3. Post-proceso (Interpolación)
-        da_seg_mask = torch.nn.functional.interpolate(da_seg_out, size=(h_orig, w_orig), mode='bilinear')
-        ll_seg_mask = torch.nn.functional.interpolate(ll_seg_out, size=(h_orig, w_orig), mode='bilinear')
+        # 3. Post-proceso
+        # Interpolamos primero los logits al tamaño original
+        da_seg_resized = F.interpolate(da_seg_out, size=(h_orig, w_orig), mode='bilinear', align_corners=True)
+        ll_seg_resized = F.interpolate(ll_seg_out, size=(h_orig, w_orig), mode='bilinear', align_corners=True)
         
-        da_mask = torch.max(da_seg_mask, 1)[1].byte().squeeze().cpu().numpy()
-        ll_mask = torch.max(ll_seg_mask, 1)[1].byte().squeeze().cpu().numpy()
+        # A) Área Conducible: Argmax estándar
+        da_mask = torch.max(da_seg_resized, 1)[1].byte().squeeze().cpu().numpy()
+        
+        # B) Líneas de Carril: Argmax (Volvemos a la lógica original que funcionaba mejor geométricamente)
+        ll_mask = torch.max(ll_seg_resized, 1)[1].byte().squeeze().cpu().numpy()
 
         t_end = time.time()
         latency = (t_end - t_start) * 1000
 
         # 4. Visualización
-        # Usamos una copia limpia o el overlay según se desee
         result = img_bgr.copy()
-        overlay = np.zeros_like(img_bgr, dtype=np.uint8)
         
-        # A) Área Verde (Drivable)
+        # Capa de Área Conducible (Verde)
         if show_drivable:
-            overlay[da_mask == 1] = [0, 255, 0] 
-            result = cv2.addWeighted(result, 1.0, overlay, 0.4, 0)
-        
-        # B) Máscara Sólida (Opcional, el usuario pidió apagarla generalmente)
-        if show_lanes:
-            overlay_lanes = np.zeros_like(img_bgr, dtype=np.uint8)
-            overlay_lanes[ll_mask == 1] = [0, 0, 255]
-            result = cv2.addWeighted(result, 1.0, overlay_lanes, 0.4, 0)
+            overlay_da = np.zeros_like(result)
+            overlay_da[da_mask == 1] = [0, 255, 0]
+            # Usamos una mezcla suave solo donde hay detección
+            mask_bool = da_mask == 1
+            result[mask_bool] = cv2.addWeighted(result[mask_bool], 0.6, overlay_da[mask_bool], 0.4, 0)
 
-        # C) VECTORIZACIÓN: Líneas simplificadas con pocos puntos
-        if show_lane_points:
-            # Encontrar contornos en la máscara binaria
-            contours, _ = cv2.findContours(ll_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Capa de Líneas (Roja - Opcional)
+        if show_lanes:
+            overlay_ll = np.zeros_like(result)
+            # Pintamos rojo solo donde ll_mask es 1 Y NO es da_mask (evitar solapamiento feo)
+            # A veces ayuda pintar solo lo que no es drivable, pero YOLOP suele separar bien.
+            overlay_ll[ll_mask == 1] = [0, 0, 255]
             
+            mask_bool = ll_mask == 1
+            result[mask_bool] = cv2.addWeighted(result[mask_bool], 0.6, overlay_ll[mask_bool], 0.4, 0)
+
+        # Capa de Vectores (Cyan - Limpia)
+        if show_lane_points:
+            contours, _ = cv2.findContours(ll_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             for cnt in contours:
-                # Filtrar ruido: Si el área es muy pequeña, ignorar
-                if cv2.contourArea(cnt) < 100:
-                    continue
+                area = cv2.contourArea(cnt)
                 
-                # --- MAGIA MATEMÁTICA: SIMPLIFICACIÓN ---
-                # epsilon determina la "tolerancia". 
-                # 0.02 (2%) del perímetro es un buen balance para carreteras.
-                # Si quieres líneas AÚN más rectas/simples, sube a 0.03 o 0.04.
+                # FILTRO 1: Ruido pequeño
+                if area < 400: continue
+                
+                # FILTRO 2: El "Marco" de la imagen
+                # Si el contorno es casi tan grande como la imagen entera, es un error del modelo
+                x, y, w, h = cv2.boundingRect(cnt)
+                if w > w_orig * 0.95 and h > h_orig * 0.95:
+                    continue # Ignoramos el marco completo
+                
                 epsilon = 0.02 * cv2.arcLength(cnt, True)
                 approx = cv2.approxPolyDP(cnt, epsilon, True)
                 
-                # Dibujar la polilínea simplificada (Cyan, gruesa)
+                # Dibujar línea cyan
                 cv2.drawContours(result, [approx], -1, (255, 255, 0), 3)
                 
-                # Dibujar los vértices/puntos de anclaje (Rojos)
+                # Dibujar puntos
                 for point in approx:
-                    x, y = point[0]
-                    cv2.circle(result, (x, y), 5, (0, 0, 255), -1)
+                    px, py = point[0]
+                    cv2.circle(result, (px, py), 5, (0, 0, 255), -1)
 
         return result, latency

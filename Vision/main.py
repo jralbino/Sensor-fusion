@@ -13,6 +13,7 @@ from lanes.yolop_detector import YOLOPDetector
 #from lanes.segformer_detector import SegFormerDetector
 from lanes.polylanenet_detector import PolyLaneNetDetector
 from lanes.ufld_detector import UFLDDetector
+from utils.paths import PathManager
 
 def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
     """
