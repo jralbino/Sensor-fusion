@@ -1,73 +1,69 @@
 # 🚗 Sensor Fusion Studio: Object & Lane Detection
 
-Una plataforma interactiva para la experimentación y visualización de técnicas de **Fusión de Sensores (Cámara)**. Este proyecto permite comparar en tiempo real diferentes arquitecturas de Detección de Objetos y Segmentación de Carriles.
+An interactive platform for experimentation and visualization of **Camera Sensor Fusion** techniques. This project allows for real-time comparison of different Object Detection and Lane Segmentation architectures.
 
 ![Sensor Fusion Demo](demo_screenshot.png)
-*(Asegúrate de subir una captura de pantalla de tu app y nombrarla demo_screenshot.png)*
 
-## 🚀 Características Principales
+## 🚀 Key Features
 
-* **Detección de Objetos:** Soporte para modelos SOTA como **YOLO11** y **RT-DETR**.
-* **Detección de Carriles:** Comparativa visual entre métodos geométricos y de segmentación:
-    * **YOLOP (Panoptic Driving Perception):** Segmentación de área conducible y líneas.
-    * **UFLD (Ultra Fast Lane Detection):** Detección de alta velocidad basada en *row-anchors*.
-    * **PolyLaneNet:** Regresión polinomial directa mediante redes neuronales profundas.
-    * **SegFormer (NVIDIA):** Segmentación semántica basada en Transformers.
-* **Interfaz Interactiva:**
-    * Filtrado dinámico de clases (ej. mostrar solo "Coches" o "Peatones").
-    * Visualización selectiva de capas (Vectores, Máscaras, Bounding Boxes).
-    * Cálculo de latencia en tiempo real (ms).
+* **Object Detection:** Support for SOTA models like **YOLO11** and **RT-DETR**.
+* **Lane Detection:** Visual comparison between geometric and segmentation methods:
+    * **YOLOP (Panoptic Driving Perception):** Drivable area and lane line segmentation.
+    * **UFLD (Ultra Fast Lane Detection):** High-speed detection based on row-anchors.
+    * **PolyLaneNet:** Direct polynomial regression using deep neural networks.
+    * **SegFormer (NVIDIA):** Semantic segmentation based on Transformers.
+* **Interactive Interface:**
+    * **Dynamic Filtering:** Filter objects by class (e.g., show only "Cars" or "Trucks") based on active detections.
+    * **Selective Visualization:** Toggle layers (Vectors, Masks, Bounding Boxes).
+    * **Performance Metrics:** Real-time latency calculation (ms).
 
-## 🛠️ Instalación
+## 🛠️ Installation
 
-1.  **Clonar el repositorio:**
-    ```bash
-    git clone [https://github.com/TU_USUARIO/sensor-fusion.git](https://github.com/TU_USUARIO/sensor-fusion.git)
-    cd sensor-fusion
-    ```
+1.  **Clone the repository:**
 
-2.  **Crear un entorno virtual (Recomendado):**
+2.  **Create a virtual environment (Recommended):**
     ```bash
     python -m venv venv
     
-    # En Windows:
+    # On Windows:
     venv\Scripts\activate
     
-    # En Mac/Linux:
+    # On Mac/Linux:
     source venv/bin/activate
     ```
 
-3.  **Instalar dependencias:**
+3.  **Install dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
 
-## 📂 Estructura del Proyecto
+## 📂 Project Structure
 
-* `Vision/app.py`: Frontend interactivo (Streamlit).
-* `Vision/src/detectors/`: Lógica de inferencia para YOLO y RT-DETR.
-* `Vision/src/lanes/`: Implementaciones de detectores de carril (YOLOP, UFLD, etc.).
-* `Vision/models/`: Carpeta donde se deben colocar los pesos `.pt` o `.pth`.
-* `Vision/data/`: Directorio para imágenes o videos de prueba.
+* `Vision/app.py`: Interactive Frontend (Streamlit).
+* `Vision/src/detectors/`: Inference logic for YOLO and RT-DETR.
+* `Vision/src/lanes/`: Lane detector implementations (YOLOP, UFLD, etc.).
+* `Vision/models/`: Directory for placing `.pt` or `.pth` model weights.
+* `Vision/data/`: Directory for test images or videos.
 
-## ▶️ Uso
+## ▶️ Usage
 
-1.  Asegúrate de tener tus modelos (pesos) en la carpeta `Vision/models/`.
-    * *Ejemplo: `yolo11l.pt`, `tusimple_18.pth`, etc.*
-2.  Ejecuta la aplicación desde la raíz del proyecto:
+1.  Ensure you have your model weights in the `Vision/models/` folder.
+    * *Example: `yolo11l.pt`, `tusimple_18.pth`, etc.*
+2.  Run the application from the project root:
 
     ```bash
     streamlit run Vision/app.py
     ```
 
-3.  Abre tu navegador en la dirección que aparece en la terminal (usualmente `http://localhost:8501`).
+3.  Open your browser at the address shown in the terminal (usually `http://localhost:8501`).
 
-## 📊 Modelos Soportados
+## 📊 Supported Models
 
-| Tarea | Modelo | Framework |
+| Task | Model | Framework |
 |-------|--------|-----------|
-| Objetos | YOLO11 (L/X) | Ultralytics |
-| Objetos | RT-DETR | Ultralytics |
-| Carriles | YOLOP | TorchHub |
-| Carriles | UFLD | PyTorch Custom |
-| Carriles | PolyLaneNet | PyTorch + EfficientNet |
+| Objects | YOLO11 (L/X) | Ultralytics |
+| Objects | RT-DETR | Ultralytics |
+| Lanes | YOLOP | TorchHub |
+| Lanes | UFLD | PyTorch Custom |
+| Lanes | PolyLaneNet | PyTorch + EfficientNet |
+| Lanes | SegFormer | HuggingFace Transformers |
