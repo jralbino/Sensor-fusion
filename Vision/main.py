@@ -9,6 +9,10 @@ from predictor import BatchPredictor
 from visualizer import ResultVisualizer
 from benchmark import ModelBenchmark
 from lanes.yolop_detector import YOLOPDetector
+#from lanes.deeplab_detector import DeepLabDetector 
+#from lanes.segformer_detector import SegFormerDetector
+from lanes.polylanenet_detector import PolyLaneNetDetector
+from lanes.ufld_detector import UFLDDetector
 
 def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
     """
@@ -85,32 +89,57 @@ def main():
         )
         if json_path: generated_jsons.append((name, json_path))
 
-    # --- FASE 2: VIDEO COMPARATIVO (CON CARRILES) ---
+    # --- FASE 2: VIDEO COMPARATIVO (SENSOR FUSION) ---
     if generated_jsons:
         print("\n🎥 --- FASE 2: VIDEO COMPARATIVO (SENSOR FUSION) ---")
         
-        # 1. Configuración de Visualización de Carriles (CONTROL AQUÍ)
+        # --- OPCIONES DE CONFIGURACIÓN (Solo afectan a YOLOP, DeepLab las ignora) ---
         LANE_OPTIONS = {
-            'show_drivable': False,      # ¿Mostrar área verde de conducción?
-            'show_lanes': False,        # ¿Mostrar máscara roja sólida? (Lo apago para ver mejor los puntos)
-            'show_lane_points': True    # ¿Mostrar contornos/puntos conectados? (NUEVO)
+            'show_drivable': True,
+            'show_lanes': False,
+            'show_lane_points': True
         }
         
+        # ### SELECCIÓN DE MODELO DE CARRILES (Visualización de fondo) ###
+        
+        # OPCIÓN A: YOLOP (Especializado en Carriles/Road) -> DESCOMENTAR PARA USAR
         print(f"   Iniciando YOLOP... Config: {LANE_OPTIONS}")
         lane_model = YOLOPDetector()
+        model_suffix = "YOLOP"
+
+        # OPCIÓN B: DeepLabV3 (Generalista COCO) -> ACTIVO AHORA
+        #print(f"   Iniciando DeepLabV3 (General Segmentation)...")
+        #lane_model = DeepLabDetector()
+        #model_suffix = "DeepLab"
+
+        # ### SELECCIÓN DE MODELO ###
+        #print(f"   Iniciando NVIDIA SegFormer (Cityscapes SOTA)...")
+        #lane_model = SegFormerDetector() # Instanciamos SegFormer
+        #model_suffix = "NVIDIA_SegFormer"
+
+        #print(f"   Iniciando UFLD (TuSimple Benchmark Winner)...")
+        #lane_model = UFLDDetector() 
+        #model_suffix = "UFLD"
         
+        #print(f"   Iniciando PolyLaneNet (TuSimple Challenge - Regresión Polinomial)...")
+        #lane_model = PolyLaneNetDetector(model_path="models/model_2305.pt")
+        #model_suffix = "PolyLaneNet"
+
         viz = ResultVisualizer(images_dir=IMAGES_DIR, output_dir=VIDEOS_DIR)
         
-        # Nombre del video indicando configuración
-        video_name = f"fusion_points_{'ON' if LANE_OPTIONS['show_lane_points'] else 'OFF'}.mp4"
+        video_name = f"fusion_comparison_{model_suffix}.mp4"
         
         viz.generate_video(
             generated_jsons, 
             video_name, 
             fps=5,
             lane_detector=lane_model,
-            lane_config=LANE_OPTIONS  # <--- Pasamos la configuración
+            lane_config=LANE_OPTIONS 
         )
+
+        # ------------------------------------------------------------
+        
+        
 
     # --- FASE 3: BENCHMARK (Con el mismo límite) ---
     print(f"\n📊 --- FASE 3: BENCHMARK (Sobre {LIMIT if LIMIT else 'todas'} las imágenes) ---")

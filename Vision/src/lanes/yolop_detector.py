@@ -2,12 +2,12 @@ import torch
 import cv2
 import numpy as np
 import torchvision.transforms as transforms
-import time  # <--- NUEVO
+import time
 
 class YOLOPDetector:
     def __init__(self, device=None):
         """
-        Detector de carriles YOLOP con medición de tiempo.
+        Detector YOLOP con vectorización de líneas (Polígonos simplificados).
         """
         self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"🛣️ Cargando YOLOP en {self.device}...")
@@ -26,13 +26,11 @@ class YOLOPDetector:
         ])
         self.img_size = 640
 
-    def detect(self, img_bgr, show_drivable=True, show_lanes=True, show_lane_points=False):
+    def detect(self, img_bgr, show_drivable=True, show_lanes=False, show_lane_points=True):
         """
-        Retorna:
-            result (numpy array): Imagen con visualización.
-            latency (float): Tiempo de inferencia en milisegundos.
+        Retorna la imagen procesada y la latencia.
         """
-        t_start = time.time()  # <--- INICIO CRONÓMETRO
+        t_start = time.time()
 
         h_orig, w_orig, _ = img_bgr.shape
         
@@ -45,34 +43,55 @@ class YOLOPDetector:
         with torch.no_grad():
             _, da_seg_out, ll_seg_out = self.model(input_tensor)
 
-        # 3. Post-proceso
+        # 3. Post-proceso (Interpolación)
         da_seg_mask = torch.nn.functional.interpolate(da_seg_out, size=(h_orig, w_orig), mode='bilinear')
         ll_seg_mask = torch.nn.functional.interpolate(ll_seg_out, size=(h_orig, w_orig), mode='bilinear')
         
         da_mask = torch.max(da_seg_mask, 1)[1].byte().squeeze().cpu().numpy()
         ll_mask = torch.max(ll_seg_mask, 1)[1].byte().squeeze().cpu().numpy()
 
-        t_end = time.time()  # <--- FIN CRONÓMETRO
-        latency = (t_end - t_start) * 1000  # ms
+        t_end = time.time()
+        latency = (t_end - t_start) * 1000
 
         # 4. Visualización
+        # Usamos una copia limpia o el overlay según se desee
+        result = img_bgr.copy()
         overlay = np.zeros_like(img_bgr, dtype=np.uint8)
         
+        # A) Área Verde (Drivable)
         if show_drivable:
             overlay[da_mask == 1] = [0, 255, 0] 
+            result = cv2.addWeighted(result, 1.0, overlay, 0.4, 0)
+        
+        # B) Máscara Sólida (Opcional, el usuario pidió apagarla generalmente)
         if show_lanes:
-            overlay[ll_mask == 1] = [0, 0, 255]
+            overlay_lanes = np.zeros_like(img_bgr, dtype=np.uint8)
+            overlay_lanes[ll_mask == 1] = [0, 0, 255]
+            result = cv2.addWeighted(result, 1.0, overlay_lanes, 0.4, 0)
 
-        result = cv2.addWeighted(img_bgr, 1.0, overlay, 0.4, 0)
-
+        # C) VECTORIZACIÓN: Líneas simplificadas con pocos puntos
         if show_lane_points:
+            # Encontrar contornos en la máscara binaria
             contours, _ = cv2.findContours(ll_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(result, contours, -1, (255, 255, 0), 2)
+            
             for cnt in contours:
-                epsilon = 0.005 * cv2.arcLength(cnt, True)
+                # Filtrar ruido: Si el área es muy pequeña, ignorar
+                if cv2.contourArea(cnt) < 100:
+                    continue
+                
+                # --- MAGIA MATEMÁTICA: SIMPLIFICACIÓN ---
+                # epsilon determina la "tolerancia". 
+                # 0.02 (2%) del perímetro es un buen balance para carreteras.
+                # Si quieres líneas AÚN más rectas/simples, sube a 0.03 o 0.04.
+                epsilon = 0.02 * cv2.arcLength(cnt, True)
                 approx = cv2.approxPolyDP(cnt, epsilon, True)
+                
+                # Dibujar la polilínea simplificada (Cyan, gruesa)
+                cv2.drawContours(result, [approx], -1, (255, 255, 0), 3)
+                
+                # Dibujar los vértices/puntos de anclaje (Rojos)
                 for point in approx:
                     x, y = point[0]
-                    cv2.circle(result, (x, y), 3, (0, 255, 255), -1)
+                    cv2.circle(result, (x, y), 5, (0, 0, 255), -1)
 
-        return result, latency  # <--- RETORNAMOS LA LATENCIA
+        return result, latency
