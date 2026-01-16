@@ -1,0 +1,19 @@
+# Core & Visualization
+streamlit>=1.30.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+pyyaml>=6.0
+tqdm>=4.65.0
+
+# Deep Learning (Pytorch Ecosystem)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Object Detection
+ultralytics>=8.1.0
+
+# Lane Detection & Segmentation Dependencies
+scipy>=1.10.0
+transformers>=4.30.0  # Para SegFormer
+efficientnet_pytorch>=0.7.1  # Para PolyLaneNet
+timm>=0.9.0  # A veces requerido por backbones modernos
