@@ -32,10 +32,7 @@ def convert_bdd_folder_to_coco(json_folder, output_labels_dir):
         with open(json_file, 'r') as f:
             item = json.load(f)
             
-        # A veces el JSON individual tiene una estructura distinta. 
-        # Normalmente BDD individual es: { "name": "...", "frames": [...] } o directo el dict.
-        # Vamos a asumir que es un dict con 'labels' o 'frames'.
-        
+          
         labels = []
         if 'labels' in item:
             labels = item['labels']
@@ -76,11 +73,9 @@ def convert_bdd_folder_to_coco(json_folder, output_labels_dir):
     print(f"✅ Conversión terminada. Labels válidos generados: {converted_count}")
 
 if __name__ == "__main__":
-    # AJUSTA ESTAS RUTAS
-    # Tu carpeta con los miles de JSONs
-    INPUT_FOLDER = "data/raw/bdd100k/labels/100k/val" 
-    
-    # Donde YOLO buscará los labels (debe acabar en coco_format/val)
-    OUTPUT_DIR = "data/raw/bdd100k/labels/100k/val"
+    # Carpeta JSONs
+    INPUT_FOLDER = "Vision/data/raw/bdd100k/labels/100k/train" 
+    # labels 
+    OUTPUT_DIR = "Vision/data/raw/bdd100k/labels/100k/train"
     
     convert_bdd_folder_to_coco(INPUT_FOLDER, OUTPUT_DIR)
