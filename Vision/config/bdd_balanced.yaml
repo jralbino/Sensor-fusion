@@ -1,0 +1,23 @@
+# Ruta base de tu nuevo dataset balanceado
+path: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Vision/data/raw/bdd100k/balanced_train
+
+# Ruta relativa: busca dentro de 'path' -> /balanced_train/images
+train: images
+
+# Ruta ABSOLUTA a la carpeta de validación original (para que no la busque en la raíz del sistema)
+val: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Vision/data/raw/bdd100k/images/100k/val
+
+# Clases
+names:
+  0: person
+  1: bicycle
+  2: car
+  3: motorcycle
+  4: airplane
+  5: bus
+  6: train
+  7: truck
+  8: boat
+  9: traffic light
+  10: fire hydrant
+  11: stop sign

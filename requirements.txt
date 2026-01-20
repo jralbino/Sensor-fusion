@@ -17,3 +17,6 @@ scipy>=1.10.0
 transformers>=4.30.0  # Para SegFormer
 efficientnet_pytorch>=0.7.1  # Para PolyLaneNet
 timm>=0.9.0  # A veces requerido por backbones modernos
+
+nuscenes-devkit>=1.1.9
+matplotlib>=3.7.0

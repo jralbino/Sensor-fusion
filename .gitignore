@@ -11,6 +11,16 @@ Vision/output/
 Vision/runs/
 venv/
 
+Fusion/data/
+Fusion/runs/
+
+Lidar/checkpoints/
+Lidar/configs/
+Lidar/debug_sequence/
+Lidar/runs/
+
+runs/
+
 # IDE
 .vscode/
 .idea/

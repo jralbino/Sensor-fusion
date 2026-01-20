@@ -1,0 +1,18 @@
+# Vision/config/nuscenes.yaml
+path: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Fusion/data/yolo_format
+
+train: images/val # Usamos val para todo ya que es un benchmark del mini
+val: images/val
+
+# Mapeo idéntico a BDD/COCO para compatibilidad con tus modelos
+names:
+  0: person
+  1: bicycle
+  2: car
+  3: motorcycle
+  4: airplane
+  5: bus
+  6: train
+  7: truck
+  8: boat
+  9: traffic light

@@ -1,6 +1,18 @@
 from ultralytics import YOLO, RTDETR
 import time
 import torch
+from pathlib import Path
+
+# Importamos PathManager para saber dónde está la carpeta Vision
+try:
+    from utils.paths import PathManager
+except ImportError:
+    # Fallback por si se ejecuta este archivo directamente
+    from pathlib import Path
+    class PathManager:
+        @staticmethod
+        def get_path(*args):
+            return Path("Vision").joinpath(*args)
 
 class ObjectDetector:
     def __init__(self, model_path='models/yolo11l.pt', conf=0.5, iou=0.45, device=None):
@@ -28,7 +40,6 @@ class ObjectDetector:
             self.model = YOLO(model_path)
             
     def get_parameters(self):
-        """Retorna los metadatos de configuración para guardarlos en el JSON."""
         return {
             "model_architecture": self.model_path,
             "confidence_threshold": self.conf,
@@ -36,32 +47,38 @@ class ObjectDetector:
             "device": self.device
         }
 
-    def detect(self, image, classes=None):  # <--- AQUÍ ESTABA EL ERROR (Faltaba classes=None)
+    def detect(self, image, classes=None):
         """
         Retorna:
             detections (list): Lista de dicts
             plot (numpy array): Imagen pintada
             stats (dict): Tiempos de inferencia
-            
-        Args:
-            image (numpy array): Imagen de entrada
-            classes (list[int], optional): Lista de IDs de clases a detectar (ej: [0, 2]). 
         """
         start_time = time.time()
         
-        # Inferencia con parámetros explícitos y filtro de clases
+        # Calculamos la ruta segura: Vision/runs/detect
+        # Así evitamos que cree 'runs' en la raíz del proyecto
+        project_path = PathManager.get_path("runs", "detect")
+        
+        # Inferencia con redirección de carpeta 'runs'
         results = self.model.predict(
             source=image, 
             conf=self.conf, 
             iou=self.iou,
             device=self.device, 
             verbose=False,
-            classes=classes  # <--- ESTO ES LO QUE YOLO NECESITA PARA FILTRAR
-        )[0] 
+            classes=classes,
+            
+            # --- CORRECCIÓN DE RUTAS ---
+            save=False,               # No guardar imágenes en disco (lo hacemos en RAM)
+            project=str(project_path), # Forzar carpeta Vision/runs/detect
+            name="inference"          # Subcarpeta 'inference' (se reusa si existe)
+            # ---------------------------
+        )[0]
         
         end_time = time.time()
         
-        # Procesar resultados para JSON
+        # Procesar resultados
         parsed_detections = []
         names = results.names 
         

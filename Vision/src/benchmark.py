@@ -1,6 +1,15 @@
 from ultralytics import YOLO, RTDETR
 import sys
+import os
 from pathlib import Path
+
+# Importamos PathManager para consistencia
+try:
+    from utils.paths import PathManager
+except ImportError:
+    # Fallback si se ejecuta desde src/
+    sys.path.append(str(Path(__file__).parent.parent))
+    from utils.paths import PathManager
 
 class ModelBenchmark:
     def __init__(self, data_yaml):
@@ -12,6 +21,11 @@ class ModelBenchmark:
         print("="*40)
 
         results = {}
+        
+        # --- DEFINIR RUTA SEGURA DE SALIDA ---
+        # Esto fuerza que todo vaya a Vision/output/runs/benchmark
+        # independientemente de donde ejecutes el script (raíz, Vision/, src/, etc.)
+        output_project = PathManager.get_path("output", "runs")
 
         for name, path in models_config:
             print(f"\n📊 Evaluando Modelo: {name}")
@@ -23,16 +37,22 @@ class ModelBenchmark:
                 else:
                     model = YOLO(path)
                 
-                # --- CORRECCIÓN AQUÍ ---
-                # Redirigir la salida del benchmark a 'output/runs/benchmark'
+                # --- CORRECCIÓN DEFINITIVA DE RUTAS ---
                 metrics = model.val(
                     data=self.data_yaml, 
                     split='val', 
                     device='cuda', 
                     verbose=False,
                     plots=False,
-                    project='output/runs',  # <--- Carpeta base correcta
-                    name=f'benchmark_{name}' # <--- Subcarpeta organizada por modelo
+                    
+                    # 1. 'project': Ruta base absoluta/segura (evita ./runs)
+                    project=str(output_project),  
+                    
+                    # 2. 'name': Subcarpeta (ej: benchmark_YOLO11-L)
+                    name=f'benchmark_{name}',
+                    
+                    # 3. 'exist_ok': Evita crear benchmark_YOLO11-L2, L3, etc.
+                    exist_ok=True 
                 )
                 
                 map50_95 = metrics.box.map
