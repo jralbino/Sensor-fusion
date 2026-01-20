@@ -1,69 +1,57 @@
-# 🚗 Sensor Fusion Studio: Object & Lane Detection
+Este archivo debe ir en la carpeta raíz `Sensor-fusion/` y sirve como portada del proyecto.
 
-An interactive platform for experimentation and visualization of **Camera Sensor Fusion** techniques. This project allows for real-time comparison of different Object Detection and Lane Segmentation architectures.
+```markdown
+# 🚗 Multi-Modal Sensor Fusion for Autonomous Driving
 
-![Sensor Fusion Demo](demo_screenshot.png)
+![Project Banner](assets/banner_demo.png)
+*(Coloca aquí una imagen impactante que combine visión y datos)*
 
-## 🚀 Key Features
+Repositorio integral para la percepción en conducción autónoma. Este proyecto implementa pipelines de **Visión Computacional**, **Procesamiento Lidar/Radar** y **Fusión de Sensores** para la detección robusta de objetos y carriles en entornos complejos (BDD100K, NuScenes).
 
-* **Object Detection:** Support for SOTA models like **YOLO11** and **RT-DETR**.
-* **Lane Detection:** Visual comparison between geometric and segmentation methods:
-    * **YOLOP (Panoptic Driving Perception):** Drivable area and lane line segmentation.
-    * **UFLD (Ultra Fast Lane Detection):** High-speed detection based on row-anchors.
-    * **PolyLaneNet:** Direct polynomial regression using deep neural networks.
-    * **SegFormer (NVIDIA):** Semantic segmentation based on Transformers.
-* **Interactive Interface:**
-    * **Dynamic Filtering:** Filter objects by class (e.g., show only "Cars" or "Trucks") based on active detections.
-    * **Selective Visualization:** Toggle layers (Vectors, Masks, Bounding Boxes).
-    * **Performance Metrics:** Real-time latency calculation (ms).
+## 🌟 Características Principales
+* **Visión:** Comparativa SOTA (YOLO11, RT-DETR, YOLOP, PolyLaneNet).
+* **Entrenamiento:** Scripts de *Fine-tuning* para adaptar modelos a datasets de conducción.
+* **Benchmarks:** Herramientas automatizadas para medir mAP y Latencia.
+* **Interfaz:** App interactiva basada en Streamlit.
 
-## 🛠️ Installation
+## 🛠️ Instalación
 
-1.  **Clone the repository:**
+1.  **Clonar el repositorio:**
+    ```bash
+    git clone [https://github.com/jralbino/Sensor-fusion.git](https://github.com/jralbino/Sensor-fusion.git)
+    cd Sensor-fusion
+    ```
 
-2.  **Create a virtual environment (Recommended):**
+2.  **Configurar entorno virtual:**
     ```bash
     python -m venv venv
     
-    # On Windows:
+    # Windows
     venv\Scripts\activate
-    
-    # On Mac/Linux:
+    # Linux/Mac
     source venv/bin/activate
     ```
 
-3.  **Install dependencies:**
+3.  **Instalar dependencias:**
     ```bash
     pip install -r requirements.txt
     ```
 
-## 📂 Project Structure
+## 📦 Modelos Necesarios
+Para que el proyecto funcione al 100%, descarga los siguientes pesos y colócalos en `Vision/models/`:
 
-* `Vision/app.py`: Interactive Frontend (Streamlit).
-* `Vision/src/detectors/`: Inference logic for YOLO and RT-DETR.
-* `Vision/src/lanes/`: Lane detector implementations (YOLOP, UFLD, etc.).
-* `Vision/models/`: Directory for placing `.pt` or `.pth` model weights.
-* `Vision/data/`: Directory for test images or videos.
+| Modelo | Descripción | Archivo |
+|--------|-------------|---------|
+| **YOLO11** | Detección General | `yolo11l.pt`, `yolo11x.pt` |
+| **RT-DETR** | Transformer (Original) | `rtdetr-l.pt` |
+| **RT-DETR** | **Finetuned (Ours)** | `rtdetr-bdd-best.pt` |
+| **UFLD** | Lane Detection Rápida | `tusimple_18.pth` |
+| **PolyLaneNet** | Regresión de Carriles | `model_2305.pt` |
 
-## ▶️ Usage
+## 🚀 Quick Start (Visión)
 
-1.  Ensure you have your model weights in the `Vision/models/` folder.
-    * *Example: `yolo11l.pt`, `tusimple_18.pth`, etc.*
-2.  Run the application from the project root:
+Para probar el módulo de visión inmediatamente:
 
-    ```bash
-    streamlit run Vision/app.py
-    ```
-
-3.  Open your browser at the address shown in the terminal (usually `http://localhost:8501`).
-
-## 📊 Supported Models
-
-| Task | Model | Framework |
-|-------|--------|-----------|
-| Objects | YOLO11 (L/X) | Ultralytics |
-| Objects | RT-DETR | Ultralytics |
-| Lanes | YOLOP | TorchHub |
-| Lanes | UFLD | PyTorch Custom |
-| Lanes | PolyLaneNet | PyTorch + EfficientNet |
-| Lanes | SegFormer | HuggingFace Transformers |
+```bash
+cd Vision
+streamlit run app.py
