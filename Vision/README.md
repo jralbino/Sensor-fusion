@@ -3,7 +3,7 @@
 Este módulo contiene la implementación de algoritmos de Computer Vision para la detección de objetos y segmentación de carriles utilizando modelos SOTA (State-of-the-Art).
 
 ## 📸 Demo
-![Vision App Demo](../assets/vision_demo.png)
+![Vision App Demo](/assets/vision_demo.png)
 
 
 ## 📂 Estructura
