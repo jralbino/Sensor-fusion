@@ -4,6 +4,16 @@ import yaml
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+import sys
+# --- BLOQUE DE CORRECCIÓN DE PATH ---
+# Obtenemos la ruta absoluta del archivo actual y subimos 2 niveles (Vision -> Raíz)
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[3]  # Raíz del proyecto
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # Añadimos la raíz al path de Python
+# ------------------------------------
+
+from config.global_config import DATA_PATHS
 
 # Intentamos importar nuscenes (el usuario debe instalarlo: pip install nuscenes-devkit)
 try:
@@ -77,15 +87,31 @@ def convert_nuscenes_to_yolo(nusc_root, output_root):
             # Normalizar para YOLO (0-1)
             W, H = 1600, 900 # Resolución NuScenes
             
-            # Validar que esté dentro de la imagen
-            if x_max < 0 or x_min > W or y_max < 0 or y_min > H:
+            # --- CORRECCIÓN: RECORTAR (CLIP) COORDENADAS ---
+            # Esto asegura que nunca sean negativas ni mayores que la imagen
+            x_min = max(0, min(W, x_min))
+            x_max = max(0, min(W, x_max))
+            y_min = max(0, min(H, y_min))
+            y_max = max(0, min(H, y_max))
+
+            # Verificar si la caja sigue siendo válida tras el recorte
+            # (Ej: si el recorte dejó un ancho de 0, la ignoramos)
+            if (x_max - x_min) < 1 or (y_max - y_min) < 1:
                 continue
-                
+
+            # --- CÁLCULO YOLO ---
+            # Ahora es seguro normalizar
             x_center = ((x_min + x_max) / 2) / W
             y_center = ((y_min + y_max) / 2) / H
             w_norm = (x_max - x_min) / W
             h_norm = (y_max - y_min) / H
             
+            # Safety check final por errores de flotante (opcional pero recomendado)
+            x_center = min(max(0.0, x_center), 1.0)
+            y_center = min(max(0.0, y_center), 1.0)
+            w_norm = min(max(0.0, w_norm), 1.0)
+            h_norm = min(max(0.0, h_norm), 1.0)
+
             labels.append(f"{cls_id} {x_center:.6f} {y_center:.6f} {w_norm:.6f} {h_norm:.6f}")
             
         # Guardar txt
@@ -94,6 +120,6 @@ def convert_nuscenes_to_yolo(nusc_root, output_root):
 
 if __name__ == "__main__":
     # Ajusta estas rutas si es necesario
-    NUSC_ROOT = "/home/jolux/sensor-fusion-bdd/Sensor-fusion/Fusion/data/sets/nuscenes"
-    OUTPUT_YOLO = "/home/jolux/sensor-fusion-bdd/Sensor-fusion/Fusion/data/yolo_format"
+    NUSC_ROOT = str(DATA_PATHS["nuscenes"])
+    OUTPUT_YOLO = str(ROOT / "Fusion/data/yolo_format")
     convert_nuscenes_to_yolo(NUSC_ROOT, OUTPUT_YOLO)

@@ -11,6 +11,6 @@ names:
   9: traffic light
   10: fire hydrant
   11: stop sign
-path: ../data/raw/bdd100k
+path: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Vision/data/raw/bdd100k
 train: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Vision/config/temp_val_subset.txt
 val: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Vision/config/temp_val_subset.txt

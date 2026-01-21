@@ -64,16 +64,17 @@ def draw_custom_boxes(img, detections):
 def load_object_model(name, conf):
     if name == "None": return None
     files = {
-        "YOLO11-L": "yolo11l.pt",
-        "YOLO11-X": "yolo11x.pt",
-        "RTDETR-L (Original)": "rtdetr-l.pt",
-        "RTDETR-BDD (Finetuned)": "rtdetr-bdd-best.pt"
+        "YOLO11-L": "yolo11l",
+        "YOLO11-X": "yolo11x",
+        "RTDETR-L (Original)": "rtdetr_l",
+        "RTDETR-BDD (Finetuned)": "rtdetr_bdd"
     }
-    path = PathManager.get_path("models", files.get(name, "yolo11l.pt"))
+    
+    path = PathManager.get_model_path(files.get(name, "yolo11l"))
     if not path.exists():
         st.error(f"❌ Model not found: {path}")
         return None
-    return ObjectDetector(model_path=str(path), conf=conf)
+    return ObjectDetector(model_path=path, conf=conf)
 
 @st.cache_resource
 def load_lane_model(name):
@@ -122,7 +123,7 @@ if app_mode == "📊 View Benchmarks":
     # MODO BENCHMARK
     st.header("📊 Model Performance Benchmarks")
     
-    json_path = PathManager.get_path("data", "benchmark_results.json")
+    json_path = PathManager.get_data_path("output_vision") / "data/benchmark_results.json"
     if json_path.exists():
         with open(json_path, 'r') as f:
             bench_data = json.load(f)
@@ -141,7 +142,7 @@ if app_mode == "📊 View Benchmarks":
             df = pd.DataFrame(results)
             # Seleccionar columnas principales
             main_cols = ["model", "mAP50-95", "mAP50", "Precision", "Recall", "Inference_Time_ms"]
-            st.dataframe(df[main_cols].style.highlight_max(axis=0, subset=["mAP50-95", "mAP50", "Precision", "Recall"]), use_container_width=True)
+            st.dataframe(df[main_cols].style.highlight_max(axis=0, subset=["mAP50-95", "mAP50", "Precision", "Recall"]), width="stretch")
             
             # Gráfica Comparativa
             st.write("#### 🏆 mAP Comparison")
@@ -149,12 +150,12 @@ if app_mode == "📊 View Benchmarks":
             st.bar_chart(chart_data)
             
             # Análisis Detallado (Clases)
-            with st.expander("🔍 Detailed Class Performance (Is 'Person' detection low?)"):
+            with st.expander("🔍 Detailed Class Performance "):
                 for item in results:
                     st.write(f"**{item['model']}**")
                     if "per_class" in item:
                         class_df = pd.DataFrame(list(item["per_class"].items()), columns=["Class", "mAP"])
-                        st.dataframe(class_df.T, use_container_width=True)
+                        st.dataframe(class_df, width="stretch", hide_index=True)
                 
     else:
         st.info("⚠️ No benchmark results found.")
@@ -171,7 +172,7 @@ else:
 
     input_image = None
     if source_type == "Sample Image":
-        img_dir = PathManager.get_path("data", "raw", "bdd100k", "images", "100k", "val")
+        img_dir = PathManager.get_data_path("bdd100k") / "images/100k/val"
         if not img_dir.exists(): img_dir = PathManager.get_path("data", "images")
         if img_dir.exists():
             sample_files = sorted(list(img_dir.glob("*.jpg")))[:50]
@@ -222,7 +223,7 @@ else:
         col1, col2 = st.columns([3, 1])
         with col1:
             st.subheader("Fusion Result")
-            st.image(cv2.cvtColor(processed_img, cv2.COLOR_BGR2RGB), use_container_width=True)
+            st.image(cv2.cvtColor(processed_img, cv2.COLOR_BGR2RGB), width="stretch")
             m1, m2, m3 = st.columns(3)
             m1.metric("Lane Latency", f"{lane_latency:.1f} ms")
             m2.metric("Object Latency", f"{obj_latency:.1f} ms")

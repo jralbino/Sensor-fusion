@@ -2,17 +2,7 @@ from ultralytics import YOLO, RTDETR
 import time
 import torch
 from pathlib import Path
-
-# Importamos PathManager para saber dónde está la carpeta Vision
-try:
-    from utils.paths import PathManager
-except ImportError:
-    # Fallback por si se ejecuta este archivo directamente
-    from pathlib import Path
-    class PathManager:
-        @staticmethod
-        def get_path(*args):
-            return Path("Vision").joinpath(*args)
+from utils.paths import PathManager
 
 class ObjectDetector:
     def __init__(self, model_path='models/yolo11l.pt', conf=0.5, iou=0.45, device=None):
@@ -34,7 +24,7 @@ class ObjectDetector:
             
         print(f"Cargando {model_path} en {self.device} (Conf: {self.conf}, IOU: {self.iou})...")
         
-        if 'rtdetr' in model_path.lower():
+        if 'rtdetr' in model_path.stem:
             self.model = RTDETR(model_path)
         else:
             self.model = YOLO(model_path)
@@ -58,7 +48,7 @@ class ObjectDetector:
         
         # Calculamos la ruta segura: Vision/runs/detect
         # Así evitamos que cree 'runs' en la raíz del proyecto
-        project_path = PathManager.get_path("runs", "detect")
+        project_path = PathManager.get_data_path("output_vision")
         
         # Inferencia con redirección de carpeta 'runs'
         results = self.model.predict(
@@ -72,7 +62,8 @@ class ObjectDetector:
             # --- CORRECCIÓN DE RUTAS ---
             save=False,               # No guardar imágenes en disco (lo hacemos en RAM)
             project=str(project_path), # Forzar carpeta Vision/runs/detect
-            name="inference"          # Subcarpeta 'inference' (se reusa si existe)
+            name="inference",
+            exist_ok=True                    # Subcarpeta 'inference' (se reusa si existe)
             # ---------------------------
         )[0]
         

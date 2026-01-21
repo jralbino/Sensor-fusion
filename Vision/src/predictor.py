@@ -60,6 +60,11 @@ class BatchPredictor:
             image_paths = image_paths[:limit]
         else:
             print(f"📊 Procesando dataset completo ({len(image_paths)} imágenes).")
+        
+        params = detector.get_parameters()
+        for key, value in params.items():
+            if isinstance(value, Path):
+                params[key] = str(value)
 
         experiment_data = {
             "meta": detector.get_parameters(),
@@ -86,6 +91,6 @@ class BatchPredictor:
 
         # 5. Guardar
         with open(output_json_path, 'w') as f:
-            json.dump(experiment_data, f, indent=4)
+            json.dump(experiment_data, f, indent=4, default=str)
             
         return str(output_json_path)

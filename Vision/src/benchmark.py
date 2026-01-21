@@ -2,14 +2,8 @@ from ultralytics import YOLO, RTDETR
 import sys
 import os
 from pathlib import Path
+from utils.paths import PathManager
 
-# Importamos PathManager para consistencia
-try:
-    from utils.paths import PathManager
-except ImportError:
-    # Fallback si se ejecuta desde src/
-    sys.path.append(str(Path(__file__).parent.parent))
-    from utils.paths import PathManager
 
 class ModelBenchmark:
     def __init__(self, data_yaml):
@@ -22,17 +16,14 @@ class ModelBenchmark:
 
         results = {}
         
-        # --- DEFINIR RUTA SEGURA DE SALIDA ---
-        # Esto fuerza que todo vaya a Vision/output/runs/benchmark
-        # independientemente de donde ejecutes el script (raíz, Vision/, src/, etc.)
-        output_project = PathManager.get_path("output", "runs")
+        output_project = PathManager.get_data_path("output_vision")
 
         for name, path in models_config:
             print(f"\n📊 Evaluando Modelo: {name}")
             print(f"   Archivo: {path}")
             
             try:
-                if "rtdetr" in path.lower():
+                if "rtdetr" in path.stem:
                     model = RTDETR(path)
                 else:
                     model = YOLO(path)

@@ -1,10 +1,9 @@
 import sys
 import yaml
 from pathlib import Path
-from config.global_config import USER_SETTINGS, DATA_PATHS
 
 # Añadimos 'src' al path
-sys.path.append('src')
+sys.path.append('Vision/src')
 
 from predictor import BatchPredictor
 from visualizer import ResultVisualizer
@@ -15,47 +14,32 @@ from lanes.yolop_detector import YOLOPDetector
 from lanes.polylanenet_detector import PolyLaneNetDetector
 from lanes.ufld_detector import UFLDDetector
 from utils.paths import PathManager
+from config.global_config import USER_SETTINGS, DATA_PATHS, MODEL_PATHS
+
+
+# Vision/main.py
 
 def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
-    """
-    Crea un archivo YAML temporal que apunta solo a las primeras 'limit' imágenes.
-    CORREGIDO: Asegura que exista la key 'train' para evitar error de Ultralytics.
-    """
-    if limit is None:
-        # Si usamos el yaml base, asegurarnos que tenga train. 
-        # Si falla aquí, edita bdd_coco_val.yaml y descomenta 'train'.
-        return base_yaml 
-
     print(f"\n✂️ Creando configuración temporal para {limit} imágenes...")
     
-    # 1. Obtener la lista de archivos
+    # 1. Obtener imágenes con rutas absolutas dinámicas del servidor actual
     img_paths = sorted(list(Path(images_dir).glob("*.jpg")))[:limit]
+    img_paths = [str(p.resolve()) for p in img_paths] # Resuelve la ruta real en el disco
     
-    # Convertir a rutas absolutas (CRÍTICO para que YOLO no se pierda)
-    img_paths = [str(p.resolve()) for p in img_paths]
-    
-    # 2. Crear archivo .txt con la lista de imágenes
-    subset_txt_path = Path("config/temp_val_subset.txt")
-    # Asegurar que el directorio config existe
-    subset_txt_path.parent.mkdir(parents=True, exist_ok=True)
-    
+    # 2. Guardar .txt en la carpeta de configuración centralizada
+    subset_txt_path = PathManager.BASE_DIR / "Vision/config/temp_val_subset.txt"
     with open(subset_txt_path, 'w') as f:
         f.write('\n'.join(img_paths))
         
-    # 3. Leer el YAML base
+    # 3. Configurar el YAML dinámicamente
     with open(base_yaml, 'r') as f:
-        config = yaml.safe_load(f) or {} # Manejar si está vacío
+        config = yaml.safe_load(f) or {}
         
-    # --- FIX: INYECTAR CLAVES OBLIGATORIAS ---
-    abs_txt_path = str(subset_txt_path.absolute())
+    # Inyectar rutas basadas en la configuración global
+    config['path'] = str(PathManager.get_data_path("bdd100k").resolve())
+    config['val'] = str(subset_txt_path.resolve())
+    config['train'] = str(subset_txt_path.resolve())
     
-    config['val'] = abs_txt_path
-    
-    # Si 'train' no existe, lo rellenamos con la misma ruta para que YOLO no se queje
-    if 'train' not in config:
-        config['train'] = abs_txt_path 
-    
-    # 4. Guardar el nuevo YAML temporal
     with open(output_yaml_path, 'w') as f:
         yaml.dump(config, f)
         
@@ -64,21 +48,20 @@ def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
 def main():
     # --- 1. CONFIGURACIÓN ---
     IMAGES_DIR = DATA_PATHS["bdd100k"] / "images/100k/val"
-    PREDICTIONS_DIR = "output/predictions"
-    VIDEOS_DIR = "output/videos"
-    MODELS_DIR = "models"
+    PREDICTIONS_DIR = DATA_PATHS["output_vision"] / "predictions"
+    VIDEOS_DIR = DATA_PATHS["output_vision"] / "videos"
+   
     
     # YAML Original (Dataset Completo)
-    BASE_YAML = "config/bdd_coco_val.yaml"
+    BASE_YAML = "Vision/config/bdd_coco_val.yaml"
     
     # Límite de prueba (Cámbialo a None para correr todo)
     LIMIT = USER_SETTINGS["video_limit"]
-
     models_to_run = [
-        ("YOLO11-X", f"{MODELS_DIR}/yolo11x.pt"),
-        ("RTDETR-L", f"{MODELS_DIR}/rtdetr-l.pt")
+        ("YOLO11-X", MODEL_PATHS["yolo11x"]),
+        ("RTDETR-L", MODEL_PATHS["rtdetr_l"])
     ]
-
+    
     # --- FASE 1: INFERENCIA (JSONs) ---
     print(f"\n🎬 --- FASE 1: PREDICCIONES (Límite: {LIMIT}) ---")
     predictor = BatchPredictor(images_dir=IMAGES_DIR, output_dir=PREDICTIONS_DIR)
@@ -148,7 +131,7 @@ def main():
     
     # AQUI ESTÁ EL CAMBIO CLAVE:
     # Generamos un YAML que apunte solo a las imágenes del LIMIT
-    temp_yaml = "config/temp_benchmark.yaml"
+    temp_yaml = "Vision/config/temp_benchmark.yaml"
     active_yaml = create_subset_yaml(BASE_YAML, IMAGES_DIR, LIMIT, temp_yaml)
     
     benchmarker = ModelBenchmark(data_yaml=active_yaml)

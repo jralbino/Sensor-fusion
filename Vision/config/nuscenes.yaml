@@ -1,5 +1,5 @@
 # Vision/config/nuscenes.yaml
-path: ../Fusion/data/yolo_format # Ruta relativa al directorio de salida del conversor
+path: Fusion/data/yolo_format # Ruta relativa al directorio de salida del conversor
 train: images/val # Para el mini-benchmark se suele usar val
 val: images/val
 
