@@ -1,6 +1,7 @@
 import sys
 import yaml
 from pathlib import Path
+from config.global_config import USER_SETTINGS, DATA_PATHS
 
 # Añadimos 'src' al path
 sys.path.append('src')
@@ -62,7 +63,7 @@ def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
 
 def main():
     # --- 1. CONFIGURACIÓN ---
-    IMAGES_DIR = "data/raw/bdd100k/images/100k/val"
+    IMAGES_DIR = DATA_PATHS["bdd100k"] / "images/100k/val"
     PREDICTIONS_DIR = "output/predictions"
     VIDEOS_DIR = "output/videos"
     MODELS_DIR = "models"
@@ -71,7 +72,7 @@ def main():
     BASE_YAML = "config/bdd_coco_val.yaml"
     
     # Límite de prueba (Cámbialo a None para correr todo)
-    LIMIT = 50 
+    LIMIT = USER_SETTINGS["video_limit"]
 
     models_to_run = [
         ("YOLO11-X", f"{MODELS_DIR}/yolo11x.pt"),

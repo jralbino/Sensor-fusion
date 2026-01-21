@@ -1,9 +1,7 @@
 # Ruta absoluta directa a tus imágenes
-path: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Vision/data/raw/bdd100k
-
-# Rutas relativas a 'path'
-train: images/100k/train
-val: images/100k/val
+path: Vision/data/raw/bdd100k # Raíz del dataset
+train: images/100k/train      # Se expande a path/images/100k/train
+val: images/100k/val        # Se expande a path/images/100k/val
 
 # Clases (Mapeo BDD100K estandarizado a COCO format)
 names:

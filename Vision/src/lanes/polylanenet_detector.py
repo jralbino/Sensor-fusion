@@ -5,6 +5,7 @@ import numpy as np
 import time
 from pathlib import Path
 from efficientnet_pytorch import EfficientNet
+from utils.paths import PathManager
 
 # ... (Mantén las clases CustomHead y PolyRegression igual que antes) ...
 # ... (Solo cambiaremos la clase PolyLaneNetDetector abajo) ...
@@ -30,7 +31,7 @@ class PolyLaneNetDetector:
     def __init__(self, model_path=None, device='cuda'):
         # FIX DE PATH
         if model_path is None:
-             model_path = "models/model_2305.pt"
+             model_path = PathManager.get_model_path("polylanenet")
              
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         print(f"📉 Cargando PolyLaneNet desde {model_path}...")        

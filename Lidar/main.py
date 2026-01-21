@@ -78,7 +78,7 @@ def run_inference(data_loader, model_mgr, frames_limit, output_dir):
         # Limpiar modelo de memoria (opcional, depende de tu GPU)
         model_mgr.models = {} 
 
-def generate_videos(data_loader, output_dir):
+def generate_videos(data_loader, output_dir, limit=50):
     """Fase 2: Generar videos combinados (Cam + BEV) desde JSONs."""
     print(f"\n🎥 --- FASE 2: GENERACIÓN DE VIDEOS ---")
     
@@ -101,7 +101,7 @@ def generate_videos(data_loader, output_dir):
         video_path = str(output_dir / f"video_{model_name}_combined.mp4")
         out = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), 5.0, (2500, 900))
         
-        for frame_data in tqdm(data, desc=f"Rendering {model_name}"):
+        for frame_data in tqdm(data[:limit], desc="Rendering"):
             token = frame_data['token']
             dets = frame_data['detections']
             calib = data_loader.get_sample_data(token)

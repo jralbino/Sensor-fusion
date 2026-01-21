@@ -1,25 +1,26 @@
-import os
+# Vision/src/utils/paths.py
+import sys
 from pathlib import Path
 
+# Añadir la raíz al path para importar la config global
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
+from config.global_config import DATA_PATHS, MODEL_PATHS, BASE_DIR
+
 class PathManager:
-    # Definimos la raíz del proyecto (Vision/)
-    # Vision/src/utils/paths.py -> .parent (utils) -> .parent (src) -> .parent (Vision)
-    BASE_DIR = Path(__file__).resolve().parent.parent.parent
+    BASE_DIR = BASE_DIR
 
     @staticmethod
-    def get_path(*args):
-        """Construye una ruta absoluta dentro del proyecto Vision."""
-        return PathManager.BASE_DIR.joinpath(*args)
+    def get_data_path(key):
+        return DATA_PATHS.get(key)
+
+    @staticmethod
+    def get_model_path(key):
+        return MODEL_PATHS.get(key)
 
     @staticmethod
     def ensure_dir(path):
-        """Crea el directorio si no existe."""
-        path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
+        Path(path).mkdir(parents=True, exist_ok=True)
         return path
-
-    # Rutas estandarizadas (usando la variable de clase BASE_DIR)
-    MODELS = BASE_DIR / "models"
-    DATA = BASE_DIR / "data"
-    OUTPUT = BASE_DIR / "output"
-    CONFIG = BASE_DIR / "config"
