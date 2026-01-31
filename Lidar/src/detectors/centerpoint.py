@@ -3,7 +3,7 @@ from .base import BaseLidarDetector
 
 class CenterPointDetector(BaseLidarDetector):
     def load_model(self):
-        print(f"🎯 Cargando CenterPoint desde {self.checkpoint_path}...")
+        print(f"🎯 Loading CenterPoint from {self.checkpoint_path}...")
         return init_model(self.config_path, self.checkpoint_path, device=self.device)
 
     def detect(self, pcd_path):

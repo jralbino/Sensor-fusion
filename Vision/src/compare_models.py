@@ -1,43 +1,48 @@
 import cv2
 import os
 from pathlib import Path
-from detectors.object_detector import ObjectDetector
+
+from config.utils.path_manager import path_manager # Import the consolidated path manager
+from Vision.src.detectors.object_detector import ObjectDetector
 
 def run_comparison(image_folder, output_folder):
-    # Definir los modelos a comparar
-    # 'n' es nano (rápido), 's' small, 'm' medium, 'l' large, 'x' extra large
-    models_to_test = ['models/yolo11l.pt', 'models/rtdetr-l.pt'] 
+    # Define the models to compare
+    # 'n' is nano (fast), 's' small, 'm' medium, 'l' large, 'x' extra large
+    models_to_test_info = [
+        ("YOLO11-L", path_manager.get_model_detail("yolo11l_path")),
+        ("RTDETR-L", path_manager.get_model_detail("rtdetr_l_path"))
+    ]
     
-    detectors = [ObjectDetector(m) for m in models_to_test]
+    detectors = [ObjectDetector(model_path=path) for name, path in models_to_test_info]
     
-    # Obtener algunas imágenes
-    img_paths = list(Path(image_folder).glob("*.jpg"))[:3] # Probamos solo con 3
+    # Get some images
+    img_paths = list(Path(image_folder).glob("*.jpg"))[:3] # Test with only 3
     
     if not img_paths:
-        print(f"No se encontraron imágenes en {image_folder}")
+        print(f"No images found in {image_folder}")
         return
 
     output_path = Path(output_folder)
     output_path.mkdir(parents=True, exist_ok=True)
 
     for img_p in img_paths:
-        print(f"\nProcesando: {img_p.name}")
+        print(f"\nProcessing: {img_p.name}")
         original_img = cv2.imread(str(img_p))
         
         for i, detector in enumerate(detectors):
-            model_name = models_to_test[i].split('.')[0]
+            model_name_display = models_to_test_info[i][0] # Use the display name
             
             _, result_img, info = detector.detect(original_img)
             
-            print(f" -> Modelo: {model_name} | Latencia: {info['latency_ms']}ms | Objetos: {info['detections_count']}")
+            print(f" -> Model: {model_name_display} | Latency: {info['inference_time_ms']:.1f}ms | Objects: {info['total_objects']}")
             
-            # Guardar resultado
-            save_name = output_path / f"{img_p.stem}_{model_name}.jpg"
+            # Save result
+            save_name = output_path / f"{img_p.stem}_{model_name_display.replace(' ', '_')}.jpg"
             cv2.imwrite(str(save_name), result_img)
 
 if __name__ == "__main__":
-    # AJUSTA LA RUTA A DONDE TENGAS TUS IMAGENES (TEST O VAL)
-    imgs_dir = "data/raw/bdd100k/images/100k/val" 
-    out_dir = "output/comparison"
+    # ADJUST THE PATH TO WHERE YOUR IMAGES ARE LOCATED (TEST OR VAL)
+    imgs_dir = path_manager.get("bdd_images_val") 
+    out_dir = path_manager.get("vision_comparison_output", create=True)
     
-    run_comparison(imgs_dir, out_dir)
+    run_comparison(str(imgs_dir), str(out_dir))

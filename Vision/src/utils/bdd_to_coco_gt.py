@@ -3,13 +3,15 @@ import os
 from pathlib import Path
 from tqdm import tqdm
 
+from config.utils.path_manager import path_manager # Import the consolidated path manager
+
 def convert_bdd_folder_to_coco(json_folder, output_labels_dir):
     """
-    Convierte una CARPETA de JSONs individuales (formato alternativo BDD)
-    a formato YOLO txt compatible con COCO.
+    Converts a FOLDER of individual JSONs (alternative BDD format)
+    to COCO-compatible YOLO txt format.
     """
     
-    # Mapeo BDD -> COCO
+    # BDD -> COCO Mapping
     BDD_TO_COCO_MAP = {
         "pedestrian": 0, "rider": 0, "bicycle": 1, "car": 2,
         "motorcycle": 3, "bus": 5, "train": 6, "truck": 7, "traffic light": 9
@@ -20,9 +22,9 @@ def convert_bdd_folder_to_coco(json_folder, output_labels_dir):
     out_path.mkdir(parents=True, exist_ok=True)
     
     json_files = list(source_path.glob("*.json"))
-    print(f"📂 Encontrados {len(json_files)} archivos JSON en {source_path}")
+    print(f"📂 Found {len(json_files)} JSON files in {source_path}")
     
-    # Dimensiones fijas BDD
+    # Fixed BDD dimensions
     IMG_W = 1280
     IMG_H = 720
     
@@ -37,28 +39,28 @@ def convert_bdd_folder_to_coco(json_folder, output_labels_dir):
         if 'labels' in item:
             labels = item['labels']
         elif 'frames' in item and len(item['frames']) > 0:
-            # Estructura BDD tracking o atributos
+            # BDD tracking or attribute structure
             labels = item['frames'][0].get('objects', [])
         
-        # El nombre del archivo txt será el mismo que el json pero .txt
+        # The txt filename will be the same as the json but .txt
         txt_filename = out_path / (json_file.stem + ".txt")
         
         with open(txt_filename, 'w') as out_f:
             has_valid_labels = False
             for label in labels:
-                # Ajuste de claves según formato (category vs label)
+                # Key adjustment based on format (category vs label)
                 category = label.get('category', label.get('label'))
                 
                 if category in BDD_TO_COCO_MAP:
                     coco_id = BDD_TO_COCO_MAP[category]
                     
-                    # Coordenadas
+                    # Coordinates
                     box = label.get('box2d')
                     if not box: continue
                     
                     x1, y1, x2, y2 = box['x1'], box['y1'], box['x2'], box['y2']
                     
-                    # Normalización
+                    # Normalization
                     xc = ((x1 + x2) / 2) / IMG_W
                     yc = ((y1 + y2) / 2) / IMG_H
                     w = (x2 - x1) / IMG_W
@@ -70,12 +72,12 @@ def convert_bdd_folder_to_coco(json_folder, output_labels_dir):
             if has_valid_labels:
                 converted_count += 1
 
-    print(f"✅ Conversión terminada. Labels válidos generados: {converted_count}")
+    print(f"✅ Conversion finished. Valid labels generated: {converted_count}")
 
 if __name__ == "__main__":
-    # Carpeta JSONs
-    INPUT_FOLDER = "Vision/data/raw/bdd100k/labels/100k/train" 
-    # labels 
-    OUTPUT_DIR = "Vision/data/raw/bdd100k/labels/100k/train"
+    # ADJUST THE PATH TO WHERE YOUR JSONS ARE LOCATED
+    INPUT_FOLDER = path_manager.get("bdd_labels")
+    # Output labels
+    OUTPUT_DIR = path_manager.get("bdd_labels")
     
-    convert_bdd_folder_to_coco(INPUT_FOLDER, OUTPUT_DIR)
+    convert_bdd_folder_to_coco(str(INPUT_FOLDER), str(OUTPUT_DIR))

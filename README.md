@@ -1,57 +1,83 @@
-Este archivo debe ir en la carpeta raíz `Sensor-fusion/` y sirve como portada del proyecto.
-
-```markdown
 # 🚗 Multi-Modal Sensor Fusion for Autonomous Driving
 
 ![Project Banner](assets/banner_demo.png)
-*(Coloca aquí una imagen impactante que combine visión y datos)*
+*(Insert an impactful image combining vision and data here)*
 
-Repositorio integral para la percepción en conducción autónoma. Este proyecto implementa pipelines de **Visión Computacional**, **Procesamiento Lidar/Radar** y **Fusión de Sensores** para la detección robusta de objetos y carriles en entornos complejos (BDD100K, NuScenes).
+A comprehensive repository for autonomous driving perception. This project implements **Computer Vision**, **Lidar/Radar Processing**, and **Sensor Fusion** pipelines for robust object and lane detection in complex environments (BDD100K, NuScenes). The codebase has been refactored for improved modularity, maintainability, and consistent path management using a centralized `PathManager`.
 
-## 🌟 Características Principales
-* **Visión:** Comparativa SOTA (YOLO11, RT-DETR, YOLOP, PolyLaneNet).
-* **Entrenamiento:** Scripts de *Fine-tuning* para adaptar modelos a datasets de conducción.
-* **Benchmarks:** Herramientas automatizadas para medir mAP y Latencia.
-* **Interfaz:** App interactiva basada en Streamlit.
+## 🌟 Key Features
+*   **Vision:** State-of-the-Art (SOTA) comparative analysis (YOLO11, RT-DETR, YOLOP, PolyLaneNet).
+*   **Lidar:** 3D object detection with PointPillars and CenterPoint.
+*   **Fusion:** Projection of Lidar point clouds onto camera images.
+*   **Training:** Fine-tuning scripts to adapt models to driving datasets.
+*   **Benchmarks:** Automated tools for measuring mAP and Latency.
+*   **Interactive Interface:** Streamlit-based application for visualization and comparison.
 
-## 🛠️ Instalación
+## 🛠️ Installation
 
-1.  **Clonar el repositorio:**
+1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/jralbino/Sensor-fusion.git](https://github.com/jralbino/Sensor-fusion.git)
+    git clone https://github.com/jralbino/Sensor-fusion.git
     cd Sensor-fusion
     ```
 
-2.  **Configurar entorno virtual:**
+2.  **Set up a virtual environment:**
+    It is highly recommended to use a virtual environment to manage dependencies.
     ```bash
     python -m venv venv
     
-    # Windows
+    # On Windows
     venv\Scripts\activate
-    # Linux/Mac
+    # On Linux/macOS
     source venv/bin/activate
     ```
 
-3.  **Instalar dependencias:**
+3.  **Install project dependencies (including sub-module specific ones):**
+    Install the project in editable mode, along with all extra dependencies for Vision, Lidar, and Fusion modules. This command will install everything defined in `setup.py` and the respective `requirements.txt` files.
     ```bash
-    pip install -r requirements.txt
+    pip install -e ".[vision,lidar,fusion]"
     ```
+    *(Note: If you only need specific modules, you can install them individually, e.g., `pip install -e ".[vision]"`)*
 
-## 📦 Modelos Necesarios
-Para que el proyecto funcione al 100%, descarga los siguientes pesos y colócalos en `Vision/models/`:
+## 📦 Required Models
+For full project functionality, download the following pre-trained weights and place them in the `Vision/models/` and `Lidar/checkpoints/` directories as specified by the `config/config.yaml` file. The `PathManager` will locate them automatically.
 
-| Modelo | Descripción | Archivo |
-|--------|-------------|---------|
-| **YOLO11** | Detección General | `yolo11l.pt`, `yolo11x.pt` |
-| **RT-DETR** | Transformer (Original) | `rtdetr-l.pt` |
-| **RT-DETR** | **Finetuned (Ours)** | `rtdetr-bdd-best.pt` |
-| **UFLD** | Lane Detection Rápida | `tusimple_18.pth` |
-| **PolyLaneNet** | Regresión de Carriles | `model_2305.pt` |
+### Vision Models (Place in `Vision/models/`)
+| Model       | Description                 | Files                                      |
+|-------------|-----------------------------|--------------------------------------------|
+| **YOLOv11** | General Object Detection    | `yolo11l.pt`, `yolo11x.pt`                 |
+| **RT-DETR** | Transformer-based Detector  | `rtdetr-l.pt`, `rtdetr-bdd-best.pt`        |
+| **UFLD**    | Fast Lane Detection         | `tusimple_18.pth`                          |
+| **PolyLaneNet** | Lane Regression Model     | `model_2305.pt`                            |
 
-## 🚀 Quick Start (Visión)
+### Lidar Models (Place in `Lidar/checkpoints/`)
+| Model       | Description                 | Files                                      |
+|-------------|-----------------------------|--------------------------------------------|
+| **PointPillars** | 3D Object Detector (Lidar) | `pointpillars_nus.pth`                     |
+| **CenterPoint** | 3D Object Detector (Lidar) | `centerpoint_nus.pth`                      |
 
-Para probar el módulo de visión inmediatamente:
+## 🚀 Quick Start & Usage
 
+### Running the Vision Application
+The Vision component includes a Streamlit application for interactive object and lane detection. **Always run Streamlit apps from the project root directory.**
 ```bash
-cd Vision
-streamlit run app.py
+# Ensure your virtual environment is active
+# From the project root directory:
+streamlit run Vision/app.py
+```
+
+### Running the Lidar Pipeline
+The Lidar component has a pipeline for processing Lidar data, running inference, and generating visualizations.
+```bash
+# Ensure your virtual environment is active
+# From the project root directory:
+python Lidar/main.py
+```
+
+### Running the Fusion Demonstration
+The Fusion component includes a script to demonstrate the projection of Lidar points onto a camera image.
+```bash
+# Ensure your virtual environment is active
+# From the project root directory:
+python Fusion/src/lidar_to_camera.py
+```

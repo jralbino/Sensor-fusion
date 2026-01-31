@@ -3,42 +3,39 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-# Configuración de rutas
-BASE_DIR = Path(__file__).resolve().parent
-sys.path.append(str(BASE_DIR / 'src'))
+from config.utils.path_manager import path_manager # Import the consolidated path manager
 
-from lidar_utils import DataLoader
-from lidar_models import ModelManager
-from lidar_vis import LidarVisualizer
+from Lidar.src.lidar_utils import DataLoader
+from Lidar.src.lidar_models import ModelManager
+from Lidar.src.lidar_vis import LidarVisualizer
 
 def main():
-    print("🚀 Iniciando diagnóstico: SECUENCIA DE 5 FRAMES...")
+    print("🚀 Starting diagnosis: 5 FRAME SEQUENCE...")
     
-    # 1. Inicializar
+    # 1. Initialize
     data_loader = DataLoader()
-    model_mgr = ModelManager(base_dir=BASE_DIR)
+    model_mgr = ModelManager(base_dir=path_manager.BASE_DIR) # Use path_manager.BASE_DIR
     visualizer = LidarVisualizer()
     
-    # Cargar modelos
+    # Load models
     model_mgr.load_model('pointpillars')
     model_mgr.load_model('centerpoint')
     
-    # Obtener primer token
+    # Get first token
     scene = data_loader.nusc.scene[0]
     token = scene['first_sample_token']
     
-    # Directorio de salida
-    output_dir = BASE_DIR / "debug_sequence"
-    output_dir.mkdir(exist_ok=True)
+    # Output directory
+    output_dir = path_manager.get("lidar_debug_sequence_output", create=True) # Use path_manager
     
-    # 2. Bucle de 5 Frames
+    # 2. 5-Frame Loop
     for i in range(5):
-        print(f"\n📸 Procesando Frame {i+1}/5 [Token: {token}]")
+        print(f"\n📸 Processing Frame {i+1}/5 [Token: {token}]")
         calib = data_loader.get_sample_data(token)
         
         # --- A. PointPillars ---
         dets_pp = model_mgr.predict('pp', calib['lidar_path'])
-        print(f"   🔹 PointPillars: {len(dets_pp)} detecciones")
+        print(f"   🔹 PointPillars: {len(dets_pp)} detections")
         
         img_pp = visualizer.project_lidar_to_cam(
             calib['cam_path'], calib['lidar_path'], dets_pp, calib,
@@ -48,7 +45,7 @@ def main():
         
         # --- B. CenterPoint ---
         dets_cp = model_mgr.predict('cp', calib['lidar_path'])
-        print(f"   🔹 CenterPoint: {len(dets_cp)} detecciones")
+        print(f"   🔹 CenterPoint: {len(dets_cp)} detections")
         
         img_cp = visualizer.project_lidar_to_cam(
             calib['cam_path'], calib['lidar_path'], dets_cp, calib,
@@ -56,22 +53,22 @@ def main():
         )
         cv2.imwrite(str(output_dir / f"frame_{i+1}_centerpoint.jpg"), img_cp)
         
-        # --- DEBUG: Imprimir coordenadas de la detección más confiable ---
-        # Esto nos ayudará a ver si la Z o el tamaño tienen sentido
+        # --- DEBUG: Print coordinates of the most confident detection ---
+        # This will help us see if the Z-coordinate or the size make sense
         if dets_cp:
-            # Ordenar por score
+            # Sort by score
             top_det = sorted(dets_cp, key=lambda x: x['score'], reverse=True)[0]
             print(f"   🔍 Top Box CenterPoint: Pos={np.round(top_det['box'][:3], 2)} | Dim={np.round(top_det['box'][3:6], 2)}")
 
-        # Avanzar al siguiente frame
+        # Advance to the next frame
         sample_record = data_loader.nusc.get('sample', token)
         if sample_record['next']:
             token = sample_record['next']
         else:
-            print("⚠️ Fin de la escena alcanzado antes de los 5 frames.")
+            print("⚠️ End of scene reached before 5 frames.")
             break
 
-    print(f"\n✅ Proceso completado. Revisa la carpeta: {output_dir}")
+    print(f"\n✅ Process completed. Check the folder: {output_dir}")
 
 if __name__ == "__main__":
     main()

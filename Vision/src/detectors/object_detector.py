@@ -2,16 +2,17 @@ from ultralytics import YOLO, RTDETR
 import time
 import torch
 from pathlib import Path
-from utils.paths import PathManager
+from .object_detector_base import ObjectDetectorBase
+from config.utils.path_manager import path_manager
 
-class ObjectDetector:
+class ObjectDetector(ObjectDetectorBase):
     def __init__(self, model_path='models/yolo11l.pt', conf=0.5, iou=0.45, device=None):
         """
         Args:
-            model_path (str): Ruta al modelo .pt
+            model_path (str): Path to the .pt model
             conf (float): Confidence Threshold.
             iou (float): NMS Threshold.
-            device (str): 'cuda' o 'cpu'.
+            device (str): 'cuda' or 'cpu'.
         """
         self.model_path = model_path
         self.conf = conf
@@ -22,9 +23,9 @@ class ObjectDetector:
         else:
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
             
-        print(f"Cargando {model_path} en {self.device} (Conf: {self.conf}, IOU: {self.iou})...")
+        print(f"Loading {model_path} on {self.device} (Conf: {self.conf}, IOU: {self.iou})...")
         
-        if 'rtdetr' in model_path.stem:
+        if 'rtdetr' in Path(model_path).stem:
             self.model = RTDETR(model_path)
         else:
             self.model = YOLO(model_path)
@@ -39,18 +40,18 @@ class ObjectDetector:
 
     def detect(self, image, classes=None):
         """
-        Retorna:
-            detections (list): Lista de dicts
-            plot (numpy array): Imagen pintada
-            stats (dict): Tiempos de inferencia
+        Returns:
+            detections (list): List of dicts
+            plot (numpy array): Plotted image
+            stats (dict): Inference times
         """
         start_time = time.time()
         
-        # Calculamos la ruta segura: Vision/runs/detect
-        # Así evitamos que cree 'runs' en la raíz del proyecto
-        project_path = PathManager.get_data_path("output_vision")
+        # Calculate the safe path: Vision/runs/detect
+        # This avoids creating 'runs' in the project root
+        project_path = path_manager.get("output")
         
-        # Inferencia con redirección de carpeta 'runs'
+        # Inference with 'runs' folder redirection
         results = self.model.predict(
             source=image, 
             conf=self.conf, 
@@ -59,17 +60,17 @@ class ObjectDetector:
             verbose=False,
             classes=classes,
             
-            # --- CORRECCIÓN DE RUTAS ---
-            save=False,               # No guardar imágenes en disco (lo hacemos en RAM)
-            project=str(project_path), # Forzar carpeta Vision/runs/detect
+            # --- PATH CORRECTION ---
+            save=False,               # Do not save images to disk (we do it in RAM)
+            project=str(project_path), # Force Vision/runs/detect folder
             name="inference",
-            exist_ok=True                    # Subcarpeta 'inference' (se reusa si existe)
+            exist_ok=True                    # 'inference' subfolder (reused if it exists)
             # ---------------------------
         )[0]
         
         end_time = time.time()
         
-        # Procesar resultados
+        # Process results
         parsed_detections = []
         names = results.names 
         

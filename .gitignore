@@ -20,6 +20,7 @@ Lidar/debug_sequence/
 Lidar/runs/
 
 runs/
+sensor_fusion.egg-info/
 
 # IDE
 .vscode/

@@ -1,41 +1,35 @@
 import os
 from pathlib import Path
+from config.utils.path_manager import path_manager
 from nuscenes.nuscenes import NuScenes
 
-# Inicializamos nuScenes (ajusta dataroot según tu configuración)
-nusc = NuScenes(version='v1.0-mini', dataroot='Fusion/data/sets/nuscenes', verbose=True)
+# Initialize nuScenes (adjust dataroot according to your configuration)
+nusc = NuScenes(version='v1.0-mini', dataroot=str(path_manager.get('nuscenes')), verbose=True)
 
 def demo_lidar_projection(scene_index=0):
     """
-    Proyecta LiDAR en cámara y guarda la imagen en Fusion/runs/test/,
-    creando la carpeta automáticamente si no existe.
+    Projects LiDAR onto the camera and saves the image in Fusion/runs/test/,
+    creating the folder automatically if it doesn't exist.
     """
     
-    # --- 1. CONFIGURACIÓN DE RUTAS ---
-    # Obtenemos la ruta absoluta de este script (Fusion/src/lidar_to_camera.py)
-    CURRENT_FILE = Path(__file__).resolve()
+    # --- 1. PATH CONFIGURATION ---
+    # Get the Fusion module root from path_manager
+    FUSION_ROOT = path_manager.get("fusion")
     
-    # Definimos la raíz del módulo Fusion (subimos un nivel desde src/)
-    FUSION_ROOT = CURRENT_FILE.parent.parent 
+    # Define the destination folder using path_manager
+    OUTPUT_DIR = path_manager.get("fusion_runs_test", create=True)
     
-    # Definimos la carpeta de destino: Fusion/runs/test
-    OUTPUT_DIR = FUSION_ROOT / "runs" / "test"
-    
-    # --- 2. CREACIÓN AUTOMÁTICA DE CARPETA ---
-    # exist_ok=True: no da error si ya existe.
-    # parents=True: crea carpetas intermedias (ej. crea 'runs' si falta).
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Directorio de salida verificado: {OUTPUT_DIR}")
+    print(f"Output directory verified: {OUTPUT_DIR}")
 
-    # --- 3. LÓGICA DE NUSCENES ---
+    # --- 2. NUSCENES LOGIC ---
     my_scene = nusc.scene[scene_index]
     first_sample_token = my_scene['first_sample_token']
     my_sample = nusc.get('sample', first_sample_token)
 
-    # Definimos el nombre final del archivo
+    # Define the final file name
     output_path = OUTPUT_DIR / f"fusion_sample_{first_sample_token}.jpg"
 
-    print(f"Renderizando proyección para el token: {first_sample_token}")
+    print(f"Rendering projection for token: {first_sample_token}")
     
     nusc.render_pointcloud_in_image(
         my_sample['token'],
@@ -43,10 +37,10 @@ def demo_lidar_projection(scene_index=0):
         camera_channel='CAM_FRONT',
         render_intensity=True,
         show_lidarseg=False,
-        out_path=str(output_path)  # Convertimos Path a string para la librería
+        out_path=str(output_path)  # Convert Path to string for the library
     )
     
-    print(f"✅ Imagen guardada exitosamente en:\n{output_path}")
+    print(f"✅ Image saved successfully in:\n{output_path}")
 
 if __name__ == "__main__":
     demo_lidar_projection()

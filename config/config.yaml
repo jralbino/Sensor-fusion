@@ -1,0 +1,83 @@
+# Project paths. All paths are relative to the project root.
+
+dirs:
+  # Vision Module
+  vision: Vision
+  vision_src: Vision/src
+  models: Vision/models
+  configs: Vision/config
+
+  # Data Paths
+  data: data
+  bdd100k: Vision/data/raw/bdd100k
+  bdd_images_val: Vision/data/raw/bdd100k/images/100k/val
+  bdd_images_train: Vision/data/raw/bdd100k/images/100k/train
+  bdd_labels: Vision/data/raw/bdd100k/labels
+  nuscenes: Fusion/data/sets/nuscenes
+
+  # Output Paths
+  output: Vision/data/output_vision
+  predictions: Vision/data/output_vision/predictions
+  videos: Vision/data/output_vision/videos
+  benchmarks: Vision/data/output_vision/benchmarks
+  logs: Vision/data/output_vision/logs
+  vision_lanes_test_output: Vision/output/lanes_test
+  vision_comparison_output: Vision/output/comparison
+  vision_rtdetr_train_output: Vision/runs/train
+
+  # Lidar Module
+  lidar: Lidar
+  lidar_final_benchmark_output: Lidar/runs/final_benchmark
+  lidar_debug_output: Lidar/runs/debug
+  lidar_debug_sequence_output: Lidar/debug_sequence
+  lidar_checkpoints: Lidar/checkpoints
+  lidar_configs: Lidar/configs
+  lidar_video_demo_modular: Lidar/runs/video_demo_modular
+  lidar_centerpoint_train_output: Lidar/runs/centerpoint_mini
+
+  # Fusion Module
+  fusion: Fusion
+  fusion_yolo_output: Fusion/data/yolo_format
+  fusion_runs_test: Fusion/runs/test
+
+models:
+  yolo11l: yolo11l.pt
+  yolo11x: yolo11x.pt
+  rtdetr_l: rtdetr-l.pt
+  rtdetr_bdd: rtdetr-bdd-best.pt
+  rtdetr_people: rtdetr-people-signs.pt
+  yolop: yolop.pth
+  ufld: tusimple_18.pth
+  polylanenet: model_2305.pt
+
+configs:
+  bdd_det_train: bdd_det_train.yaml
+  bdd_det_val: bdd_coco_val.yaml
+  bdd_balanced: bdd_balanced.yaml
+  nuscenes: nuscenes.yaml
+
+# Specific data paths (from global_config.py)
+data_details:
+  bdd100k_base: Vision/data/raw/bdd100k
+  nuscenes_base: Fusion/data/sets/nuscenes
+  output_vision_base: Vision/output
+  output_lidar_base: Lidar/runs
+  nuscenes_infos_train_pkl: Fusion/data/sets/nuscenes/nuscenes_infos_train.pkl
+  nuscenes_infos_val_pkl: Fusion/data/sets/nuscenes/nuscenes_infos_val.pkl
+  nuscenes_dbinfos_train_pkl: Fusion/data/sets/nuscenes/nuscenes_dbinfos_train.pkl
+  bdd_balanced_train_base: Vision/data/raw/bdd100k/balanced_train
+
+# Specific model paths (from global_config.py)
+model_details:
+  yolo11l_path: Vision/models/yolo11l.pt
+  yolo11x_path: Vision/models/yolo11x.pt
+  rtdetr_l_path: Vision/models/rtdetr-l.pt
+  rtdetr_bdd_path: Vision/models/rtdetr-bdd-best.pt
+  ufld_path: Vision/models/tusimple_18.pth
+  polylanenet_path: Vision/models/model_2305.pt
+  
+  # Lidar Model paths
+  pointpillars_cfg: Lidar/configs/pointpillars/pointpillars_hv_secfpn_sbn-all_8xb4-2x_nus-3d.py
+  pointpillars_ckpt: Lidar/checkpoints/pointpillars_nus.pth
+  centerpoint_cfg: Lidar/configs/centerpoint/centerpoint_voxel0075_second_secfpn_head-circlenms_8xb4-cyclic-20e_nus-3d.py
+  centerpoint_ckpt: Lidar/checkpoints/centerpoint_nus.pth

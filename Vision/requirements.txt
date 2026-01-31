@@ -1,0 +1,9 @@
+ultralytics
+streamlit
+efficientnet_pytorch
+opencv-python
+pandas
+matplotlib
+plotly
+seaborn
+scikit-image

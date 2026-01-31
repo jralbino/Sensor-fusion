@@ -1,144 +1,211 @@
+# -*- coding: utf-8 -*-
+"""
+VERSIÓN SIN BENCHMARK - Solo genera videos
+Usa esta versión si solo quieres visualizaciones sin métricas
+"""
+
 import sys
 import yaml
+import logging
 from pathlib import Path
+from typing import List, Tuple, Optional
 
-# Añadimos 'src' al path
-sys.path.append('Vision/src')
+from config.utils.path_manager import path_manager
+from config.logging_config import setup_logging
 
-from predictor import BatchPredictor
-from visualizer import ResultVisualizer
-from benchmark import ModelBenchmark
-from lanes.yolop_detector import YOLOPDetector
-#from lanes.deeplab_detector import DeepLabDetector 
-#from lanes.segformer_detector import SegFormerDetector
-from lanes.polylanenet_detector import PolyLaneNetDetector
-from lanes.ufld_detector import UFLDDetector
-from utils.paths import PathManager
-from config.global_config import USER_SETTINGS, DATA_PATHS, MODEL_PATHS
+# Setup logging
+logger = setup_logging(
+    log_dir=path_manager.get("logs"),
+    level=logging.INFO
+)
+
+from Vision.src.predictor import BatchPredictor
+from Vision.src.visualizer import ResultVisualizer
+from Vision.src.lanes.yolop_detector import YOLOPDetector
+from Vision.src.lanes.polylanenet_detector import PolyLaneNetDetector
+from Vision.src.lanes.ufld_detector import UFLDDetector
+
+import torch
+import gc
 
 
-# Vision/main.py
-
-def create_subset_yaml(base_yaml, images_dir, limit, output_yaml_path):
-    print(f"\n✂️ Creando configuración temporal para {limit} imágenes...")
+def load_lane_detector(detector_type: str):
+    """Cargar detector de carriles."""
+    logger.info(f"Cargando detector de carriles: {detector_type}")
     
-    # 1. Obtener imágenes con rutas absolutas dinámicas del servidor actual
-    img_paths = sorted(list(Path(images_dir).glob("*.jpg")))[:limit]
-    img_paths = [str(p.resolve()) for p in img_paths] # Resuelve la ruta real en el disco
-    
-    # 2. Guardar .txt en la carpeta de configuración centralizada
-    subset_txt_path = PathManager.BASE_DIR / "Vision/config/temp_val_subset.txt"
-    with open(subset_txt_path, 'w') as f:
-        f.write('\n'.join(img_paths))
-        
-    # 3. Configurar el YAML dinámicamente
-    with open(base_yaml, 'r') as f:
-        config = yaml.safe_load(f) or {}
-        
-    # Inyectar rutas basadas en la configuración global
-    config['path'] = str(PathManager.get_data_path("bdd100k").resolve())
-    config['val'] = str(subset_txt_path.resolve())
-    config['train'] = str(subset_txt_path.resolve())
-    
-    with open(output_yaml_path, 'w') as f:
-        yaml.dump(config, f)
-        
-    return output_yaml_path
+    try:
+        if detector_type == "YOLOP":
+            return YOLOPDetector(), "YOLOP"
+        elif detector_type == "UFLD":
+            model_path = path_manager.get_model("ufld")
+            return UFLDDetector(model_path=str(model_path)), "UFLD"
+        elif detector_type == "PolyLaneNet":
+            model_path = path_manager.get_model("polylanenet")
+            return PolyLaneNetDetector(model_path=str(model_path)), "PolyLaneNet"
+        else:
+            logger.warning(f"Detector desconocido: {detector_type}, usando YOLOP")
+            return YOLOPDetector(), "YOLOP"
+    except Exception as e:
+        logger.exception(f"Error cargando detector: {e}")
+        return YOLOPDetector(), "YOLOP"
+
 
 def main():
-    # --- 1. CONFIGURACIÓN ---
-    IMAGES_DIR = DATA_PATHS["bdd100k"] / "images/100k/val"
-    PREDICTIONS_DIR = DATA_PATHS["output_vision"] / "predictions"
-    VIDEOS_DIR = DATA_PATHS["output_vision"] / "videos"
-   
+    """Pipeline SIN benchmark - solo predicciones y videos."""
     
-    # YAML Original (Dataset Completo)
-    BASE_YAML = "Vision/config/bdd_coco_val.yaml"
+    logger.info("=" * 70)
+    logger.info("PIPELINE DE SENSOR FUSION - MODO VIDEO ONLY")
+    logger.info("=" * 70)
     
-    # Límite de prueba (Cámbialo a None para correr todo)
-    LIMIT = USER_SETTINGS["video_limit"]
+    # --- CONFIGURACIÓN ---
+    IMAGES_DIR = path_manager.get("bdd_images_val")
+    PREDICTIONS_DIR = path_manager.get("predictions")
+    VIDEOS_DIR = path_manager.get("videos")
+    
+    LIMIT = None  # Cantidad de imágenes para videos
+    
     models_to_run = [
-        ("YOLO11-X", MODEL_PATHS["yolo11x"]),
-        ("RTDETR-L", MODEL_PATHS["rtdetr_l"])
+        ("YOLO11-X", path_manager.get_model("yolo11x")),
+        ("RTDETR-L", path_manager.get_model("rtdetr_l")),
+        ("RTDETR-BDD", path_manager.get_model("rtdetr_bdd")),
+        ("RTDETR-people", path_manager.get_model("rtdetr_people"))
     ]
     
-    # --- FASE 1: INFERENCIA (JSONs) ---
-    print(f"\n🎬 --- FASE 1: PREDICCIONES (Límite: {LIMIT}) ---")
-    predictor = BatchPredictor(images_dir=IMAGES_DIR, output_dir=PREDICTIONS_DIR)
-    generated_jsons = []
+    LANE_DETECTOR_TYPE = "YOLOP"
+    LANE_OPTIONS = {
+        'show_drivable': True,
+        'show_lanes': False,
+        'show_lane_points': True
+    }
     
-    for name, model_file in models_to_run:
-        json_path = predictor.run_inference(
-            model_name=name, model_path=model_file,
-            conf=0.50, limit=LIMIT
-        )
-        if json_path: generated_jsons.append((name, json_path))
-
-    # --- FASE 2: VIDEO COMPARATIVO (SENSOR FUSION) ---
+    logger.info(f"Configuración:")
+    logger.info(f"  - Imágenes: {IMAGES_DIR}")
+    logger.info(f"  - Límite: {LIMIT}")
+    logger.info(f"  - Modelos: {[name for name, _ in models_to_run]}")
+    logger.info(f"  - Lane Detector: {LANE_DETECTOR_TYPE}")
+    logger.info(f"  ⚠️  BENCHMARK DESACTIVADO (usar run_benchmark.py por separado)")
+    
+    # === FASE 1: PREDICCIONES ===
+    logger.info("\n" + "=" * 70)
+    logger.info(f"FASE 1: PREDICCIONES")
+    logger.info("=" * 70)
+    
+    predictor = BatchPredictor(images_dir=IMAGES_DIR, output_dir=PREDICTIONS_DIR)
+    generated_jsons: List[Tuple[str, Path]] = []
+    
+    for name, model_path in models_to_run:
+        logger.info(f"\n▶️  Procesando: {name}")
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+            mem_free = torch.cuda.mem_get_info()[0] / 1e9
+            logger.info(f"   GPU Memory: {mem_free:.2f}GB libre")
+        
+        try:
+            json_path = predictor.run_inference(
+                model_name=name,
+                model_path=model_path,
+                conf=0.50,
+                limit=LIMIT
+            )
+            
+            if json_path:
+                generated_jsons.append((name, json_path))
+                logger.info(f"  ✅ JSON: {json_path}")
+            
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+        
+        except Exception as e:
+            logger.exception(f"  ❌ Error: {e}")
+    
+    # === FASE 2: VIDEOS ===
     if generated_jsons:
-        print("\n🎥 --- FASE 2: VIDEO COMPARATIVO (SENSOR FUSION) ---")
+        logger.info("\n" + "=" * 70)
+        logger.info("FASE 2: GENERACIÓN DE VIDEOS")
+        logger.info("=" * 70)
         
-        # --- OPCIONES DE CONFIGURACIÓN (Solo afectan a YOLOP, DeepLab las ignora) ---
-        LANE_OPTIONS = {
-            'show_drivable': True,
-            'show_lanes': False,
-            'show_lane_points': True
-        }
-        
-        # ### SELECCIÓN DE MODELO DE CARRILES (Visualización de fondo) ###
-        
-        # OPCIÓN A: YOLOP (Especializado en Carriles/Road) -> DESCOMENTAR PARA USAR
-        print(f"   Iniciando YOLOP... Config: {LANE_OPTIONS}")
-        lane_model = YOLOPDetector()
-        model_suffix = "YOLOP"
-
-        # OPCIÓN B: DeepLabV3 (Generalista COCO) -> ACTIVO AHORA
-        #print(f"   Iniciando DeepLabV3 (General Segmentation)...")
-        #lane_model = DeepLabDetector()
-        #model_suffix = "DeepLab"
-
-        # ### SELECCIÓN DE MODELO ###
-        #print(f"   Iniciando NVIDIA SegFormer (Cityscapes SOTA)...")
-        #lane_model = SegFormerDetector() # Instanciamos SegFormer
-        #model_suffix = "NVIDIA_SegFormer"
-
-        #print(f"   Iniciando UFLD (TuSimple Benchmark Winner)...")
-        #lane_model = UFLDDetector() 
-        #model_suffix = "UFLD"
-        
-        #print(f"   Iniciando PolyLaneNet (TuSimple Challenge - Regresión Polinomial)...")
-        #lane_model = PolyLaneNetDetector(model_path="models/model_2305.pt")
-        #model_suffix = "PolyLaneNet"
-
+        lane_model, model_suffix = load_lane_detector(LANE_DETECTOR_TYPE)
         viz = ResultVisualizer(images_dir=IMAGES_DIR, output_dir=VIDEOS_DIR)
         
-        video_name = f"fusion_comparison_{model_suffix}.mp4"
+        # Videos individuales
+        logger.info("\n▶️  Videos individuales...")
+        individual_videos = []
         
-        viz.generate_video(
-            generated_jsons, 
-            video_name, 
-            fps=5,
-            lane_detector=lane_model,
-            lane_config=LANE_OPTIONS 
-        )
+        for model_name, json_path in generated_jsons:
+            logger.info(f"   - {model_name}")
+            
+            try:
+                safe_name = model_name.replace(" ", "_").replace("(", "").replace(")", "")
+                video_name = f"{safe_name}_{model_suffix}.mp4"
+                
+                preds = viz.load_predictions(json_path)
+                video_path = viz.generate_single_video(
+                    model_name=model_name,
+                    predictions=preds,
+                    output_name=video_name,
+                    fps=5,
+                    lane_detector=lane_model,
+                    lane_config=LANE_OPTIONS
+                )
+                
+                if video_path:
+                    individual_videos.append(video_path)
+                
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+            
+            except Exception as e:
+                logger.exception(f"  ❌ Error: {e}")
+        
+        # Video comparativo 2x2
+        logger.info("\n▶️  Video comparativo 2x2...")
+        
+        try:
+            all_preds = []
+            for model_name, json_path in generated_jsons:
+                preds = viz.load_predictions(json_path)
+                all_preds.append((model_name, preds))
+            
+            viz.generate_comparison_video_2x2(
+                predictions_list=all_preds,
+                output_name=f"fusion_comparison_ALL_{model_suffix}.mp4",
+                fps=5,
+                lane_detector=lane_model,
+                lane_config=LANE_OPTIONS
+            )
+        
+        except Exception as e:
+            logger.exception(f"  ❌ Error: {e}")
+        
+        # Resumen
+        logger.info("\n" + "=" * 70)
+        logger.info("📹 VIDEOS GENERADOS")
+        logger.info("=" * 70)
+        logger.info(f"  Individuales: {len(individual_videos)}")
+        for v in individual_videos:
+            logger.info(f"    • {v.name}")
+        logger.info(f"  Comparativo: fusion_comparison_ALL_{model_suffix}.mp4")
+    
+    # === FINALIZACIÓN ===
+    logger.info("\n" + "=" * 70)
+    logger.info("✅ PIPELINE COMPLETADO")
+    logger.info("=" * 70)
+    logger.info(f"\n📂 RESULTADOS:")
+    logger.info(f"  - JSONs: {PREDICTIONS_DIR}")
+    logger.info(f"  - Videos: {VIDEOS_DIR}")
+    logger.info(f"\n💡 Para benchmarks, ejecuta: python Vision/run_benchmark.py")
 
-        # ------------------------------------------------------------
-        
-        
-
-    # --- FASE 3: BENCHMARK (Con el mismo límite) ---
-    print(f"\n📊 --- FASE 3: BENCHMARK (Sobre {LIMIT if LIMIT else 'todas'} las imágenes) ---")
-    
-    # AQUI ESTÁ EL CAMBIO CLAVE:
-    # Generamos un YAML que apunte solo a las imágenes del LIMIT
-    temp_yaml = "Vision/config/temp_benchmark.yaml"
-    active_yaml = create_subset_yaml(BASE_YAML, IMAGES_DIR, LIMIT, temp_yaml)
-    
-    benchmarker = ModelBenchmark(data_yaml=active_yaml)
-    benchmarker.run(models_to_run)
-    
-    # Limpieza opcional (borrar temp)
-    # import os; os.remove(temp_yaml)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.warning("\n⚠️  Interrumpido por usuario")
+        sys.exit(1)
+    except Exception as e:
+        logger.exception(f"\n❌ Error fatal: {e}")
+        sys.exit(1)

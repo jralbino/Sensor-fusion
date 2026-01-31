@@ -9,16 +9,16 @@ class BaseLidarDetector(ABC):
 
     @abstractmethod
     def load_model(self):
-        """Inicializa el modelo usando la librería backend."""
+        """Initializes the model using the backend library."""
         pass
 
     @abstractmethod
     def detect(self, pcd_path):
         """
         Args:
-            pcd_path (str): Ruta al archivo .bin del LiDAR.
+            pcd_path (str): Path to the LiDAR .bin file.
         Returns:
-            list[dict]: Lista estandarizada de detecciones.
+            list[dict]: Standardized list of detections.
             [{'box_3d': [x,y,z,dx,dy,dz,rot], 'score': float, 'label': int}, ...]
         """
         pass

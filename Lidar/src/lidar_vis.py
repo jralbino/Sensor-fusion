@@ -7,48 +7,48 @@ from nuscenes.utils.geometry_utils import view_points, box_in_image, BoxVisibili
 class LidarVisualizer:
     def __init__(self):
         self.colors = {
-            0: (0, 0, 255),    # Coche (Rojo)
-            1: (0, 255, 255),  # Camión (Amarillo)
-            'dots': (0, 255, 0) # Puntos (Verde)
+            0: (0, 0, 255),    # Car (Red)
+            1: (0, 255, 255),  # Truck (Yellow)
+            'dots': (0, 255, 0) # Points (Green)
         }
-        # Configuración BEV
-        self.bev_res = 0.1  # Metros por pixel
-        self.bev_range = 50 # Metros a la redonda
+        # BEV Configuration
+        self.bev_res = 0.1  # Meters per pixel
+        self.bev_range = 50 # Meters around
         
-        # Correcciones Manuales (Heredadas de tus pruebas)
+        # Manual Corrections (Inherited from your tests)
         self.SHIFT_X = 0.5
 
     def render_bev(self, points_path, detections, title="BEV"):
-        """Genera la vista aérea (Eagle Eye)."""
-        # Dimensión de imagen
+        """Generates the Bird's Eye View (Eagle Eye)."""
+        # Image dimension
         img_size = int((self.bev_range * 2) / self.bev_res)
         img = np.zeros((img_size, img_size, 3), dtype=np.uint8)
 
-        # 1. PUNTOS
+        # 1. POINTS
         points = np.fromfile(points_path, dtype=np.float32, count=-1).reshape([-1, 5])
         x_pts, y_pts = points[:, 0], points[:, 1]
         
-        # Mapeo: X mundo -> -Y imagen (Arriba), Y mundo -> -X imagen (Izquierda)
-        # Centramos sumando img_size / 2
+        # Mapping: World X -> -Image Y (Top), World Y -> -Image X (Left)
+        # We center by adding img_size / 2
         x_img = ((-y_pts / self.bev_res) + img_size / 2).astype(np.int32)
         y_img = ((-x_pts / self.bev_res) + img_size / 2).astype(np.int32)
         
-        # Filtrar puntos dentro del rango
+        # Filter points within range
         mask = (x_img >= 0) & (x_img < img_size) & (y_img >= 0) & (y_img < img_size)
         img[y_img[mask], x_img[mask]] = (200, 200, 200)
 
-        # 2. CAJAS
+        # 2. BOXES
         for det in detections:
             if det['score'] < 0.2: continue
             v = det['box']
             
-            # Dimensiones (Intercambiadas para corregir giro)
+            # Dimensions (Swapped to correct rotation)
             w, l, h = v[4], v[3], v[5]
             x, y = v[0] + self.SHIFT_X, v[1]
             yaw = v[6]
 
-            # Rectángulo rotado para OpenCV
-            # Center (x,y) en pixels
+            # Rotated rectangle for OpenCV
+            # Center (x,y) in pixels
             center_x = (-y / self.bev_res) + img_size / 2
             center_y = (-x / self.bev_res) + img_size / 2
             size_x = w / self.bev_res
@@ -56,12 +56,12 @@ class LidarVisualizer:
             
             # OpenCV BoxPoints
             rect = ((center_x, center_y), (size_x, size_y), -np.degrees(yaw))
-            box = cv2.boxPoints(rect).astype(np.int32) # Fix para numpy nuevo
+            box = cv2.boxPoints(rect).astype(np.int32) 
             
             c = self.colors.get(det['label'], (0, 255, 255))
             cv2.drawContours(img, [box], 0, c, 2)
             
-            # Indicador de frente
+            # Front indicator
             front = (box[0] + box[1]) // 2
             cv2.line(img, tuple(box.mean(axis=0).astype(int)), tuple(front), (0, 255, 255), 1)
 
@@ -69,7 +69,7 @@ class LidarVisualizer:
         return img
 
     def render_camera(self, img_path, points_path, detections, calib, title=""):
-        """Proyección Frontal con correcciones."""
+        """Front Projection with corrections."""
         img = cv2.imread(img_path)
         if img is None: return np.zeros((900, 1600, 3), dtype=np.uint8)
         
@@ -79,7 +79,7 @@ class LidarVisualizer:
         if np.any(dist_coeffs):
             img = cv2.undistort(img, intrinsic, dist_coeffs)
 
-        # 2. Puntos
+        # 2. Points
         points = np.fromfile(points_path, dtype=np.float32, count=-1).reshape([-1, 5])[:, :4]
         pc = LidarPointCloud(points.T.copy())
         self._apply_transforms(pc, calib)
@@ -96,7 +96,7 @@ class LidarVisualizer:
                     c = (int(255*(1-d)), int(255*d), 0)
                     cv2.circle(img, (x, y), 2, c, -1)
 
-        # 3. Cajas
+        # 3. Boxes
         for det in detections:
             if det['score'] < 0.2: continue
             v = det['box']
@@ -104,7 +104,7 @@ class LidarVisualizer:
             w, l, h = v[4], v[3], v[5]
             center = list(v[:3])
             center[0] += self.SHIFT_X
-            # Z-Shift Dinámico: Subir la mitad de la altura + un poco
+            # Dynamic Z-Shift: Raise half the height + a bit
             center[2] += (h / 2.0) + 0.1 
             
             box = Box(center=center, size=[w, l, h], orientation=Quaternion(axis=[0,0,1], radians=v[6]))

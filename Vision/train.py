@@ -2,48 +2,50 @@ from ultralytics import RTDETR
 import torch
 from pathlib import Path
 
+from config.utils.path_manager import path_manager # Import the consolidated path manager
+
 def train():
-    # 1. Configuración Básica
-    # Ajusta el batch según tu VRAM. 
-    # RT-DETR es pesado. Si tienes error de memoria, baja BATCH_SIZE a 4 o 2.
+    # 1. Basic Configuration
+    # Adjust batch size according to your VRAM.
+    # RT-DETR is heavy. If you get a memory error, lower BATCH_SIZE to 4 or 2.
     BATCH_SIZE = 8 
-    EPOCHS = 1           # BDD es grande, 50 épocas es un buen inicio
-    IMG_SIZE = 640        # Tamaño estándar
+    EPOCHS = 1           # BDD is large, 50 epochs is a good start
+    IMG_SIZE = 640        # Standard size
     DEVICE = '0' if torch.cuda.is_available() else 'cpu'
 
-    print(f"🚀 Iniciando entrenamiento en {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}...")
+    print(f"🚀 Starting training on {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}...")
 
-    # 2. Cargar Modelo Pre-entrenado
-    # Usamos los pesos 'l' (Large) que ya tienes. 
-    # Al cargar un .pt existente, Ultralytics hace fine-tuning automáticamente.
-    model_path = "Vision/models/rtdetr-l.pt"
+    # 2. Load Pre-trained Model
+    # We use the 'l' (Large) weights you already have.
+    # When loading an existing .pt, Ultralytics performs fine-tuning automatically.
+    model_path = path_manager.get_model_detail("rtdetr_l_path") # Use path_manager
     
-    # Si no encuentra el modelo local, descargará el oficial automáticamente
-    model = RTDETR(model_path) 
+    # If the local model is not found, it will automatically download the official one
+    model = RTDETR(str(model_path)) 
 
-    # 3. Ejecutar Entrenamiento
+    # 3. Execute Training
     results = model.train(
-        data="Vision/config/bdd_det_train.yaml",
+        data=str(path_manager.get_config_path("bdd_det_train")), # Use path_manager
         epochs=EPOCHS,
         imgsz=IMG_SIZE,
         batch=BATCH_SIZE,
         device=DEVICE,
         
-        # Hiperparámetros importantes para Fine-Tuning
-        lr0=0.0001,       # Learning rate inicial bajo para no romper lo pre-entrenado
-        optimizer='AdamW', # Recomendado para Transformers
+        # Important hyperparameters for Fine-Tuning
+        lr0=0.0001,       # Low initial learning rate to avoid breaking pre-trained knowledge
+        optimizer='AdamW', # Recommended for Transformers
         
-        # Guardado
-        project="Vision/runs/train",
+        # Saving
+        project=str(path_manager.get("vision_rtdetr_train_output")), # Use path_manager
         name="rtdetr_bdd_finetune",
-        exist_ok=True,    # Sobreescribir si existe la carpeta (cuidado)
+        exist_ok=True,    # Overwrite if folder exists (be careful)
         
-        # Visualización
-        plots=True        # Genera gráficas de pérdida y mAP
+        # Visualization
+        plots=True        # Generates loss and mAP graphs
     )
     
-    print("✅ Entrenamiento finalizado.")
-    print(f"   Mejor modelo guardado en: Vision/runs/train/rtdetr_bdd_finetune/weights/best.pt")
+    print("✅ Training finished.")
+    print(f"   Best model saved in: {path_manager.get('vision_rtdetr_train_output')}/rtdetr_bdd_finetune/weights/best.pt")
 
 if __name__ == '__main__':
     train()

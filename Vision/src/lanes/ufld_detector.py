@@ -7,7 +7,9 @@ import scipy.special
 import time
 from pathlib import Path
 
-# --- ARQUITECTURA ---
+from config.utils.path_manager import path_manager # Import the consolidated path manager
+
+# --- ARCHITECTURE ---
 class ParsingNet(nn.Module):
     def __init__(self, size=(288, 800), pretrained=False, backbone='18', cls_dim=(101, 56, 4), use_aux=False):
         super(ParsingNet, self).__init__()
@@ -23,7 +25,7 @@ class ParsingNet(nn.Module):
         self.layer3 = self.model.layer3
         self.layer4 = self.model.layer4
 
-        # Head de Clasificación
+        # Classification Head
         self.cls = nn.Sequential(
             nn.Linear(1800, 2048),
             nn.ReLU(),
@@ -42,33 +44,33 @@ class ParsingNet(nn.Module):
             return group_cls, None
         return group_cls
 
-# --- DETECTOR CON CARGA AGRESIVA ---
+# --- DETECTOR WITH AGGRESSIVE LOADING ---
 class UFLDDetector:
-    def __init__(self, model_path=None, device='cuda'): # model_path opcional
+    def __init__(self, model_path=None, device='cuda'): # model_path optional
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         
-        # FIX DE PATH
+        # PATH FIX
         if model_path is None:
-            # Si no se pasa, intenta buscarlo automáticamente o lanza error
-            # Aquí asumimos que app.py SIEMPRE lo pasa, pero por seguridad:
-            model_path = "models/tusimple_18.pth"
+            # If not provided, try to find it automatically or raise an error
+            # Here we assume app.py ALWAYS passes it, but for safety:
+            model_path = path_manager.get_model("ufld") # Use path_manager
             
-        print(f"⚡ Cargando UFLD desde {model_path}...")        
+        print(f"⚡ Loading UFLD from {model_path}...")        
         
         self.input_width = 800
         self.input_height = 288
         
-        # 1. Cargar Checkpoint para inspección
+        # 1. Load Checkpoint for inspection
         path = Path(model_path)
         if not path.exists():
             path_alt = Path("models") / path.name
             path = path_alt if path_alt.exists() else path
         if not path.exists():
-            raise FileNotFoundError(f"❌ No encuentro {path}")
+            raise FileNotFoundError(f"❌ Cannot find {path}")
 
         checkpoint = torch.load(path, map_location=self.device)
         
-        # Desempaquetar
+        # Unpack
         if isinstance(checkpoint, dict):
             if 'state_dict' in checkpoint: state_dict = checkpoint['state_dict']
             elif 'model' in checkpoint: state_dict = checkpoint['model']
@@ -76,47 +78,47 @@ class UFLDDetector:
         else:
             state_dict = checkpoint
 
-        # 2. DETECTAR GEOMETRÍA (Buscando la matriz más grande)
+        # 2. DETECT GEOMETRY (Searching for the largest matrix)
         output_neurons = 22624 # Default
         max_params = 0
         
-        # Buscar la matriz de pesos más grande (que suele ser la capa final)
+        # Search for the largest weight matrix (which is usually the final layer)
         for k, v in state_dict.items():
             if len(v.shape) == 2:
                 params = v.shape[0] * v.shape[1]
-                if params > max_params and v.shape[1] == 2048: # La capa final siempre recibe 2048
+                if params > max_params and v.shape[1] == 2048: # The final layer always receives 2048
                     max_params = params
                     output_neurons = v.shape[0]
 
-        print(f"🔍 Neuronas de salida detectadas: {output_neurons}")
+        print(f"🔍 Detected output neurons: {output_neurons}")
         
         if output_neurons == 22624:
-            print("✅ Modo: TuSimple")
+            print("✅ Mode: TuSimple")
             self.cls_dim = (101, 56, 4)
             self.gridding_num = 100
             self.cls_num_per_lane = 56
         elif output_neurons == 14472:
-            print("✅ Modo: CULane")
+            print("✅ Mode: CULane")
             self.cls_dim = (201, 18, 4)
             self.gridding_num = 200
             self.cls_num_per_lane = 18
         else:
-            print(f"⚠️ Geometría no estándar ({output_neurons}). Ajustando...")
-            # Cálculo inverso asumiendo 4 carriles y 56 filas
+            print(f"⚠️ Non-standard geometry ({output_neurons}). Adjusting...")
+            # Inverse calculation assuming 4 lanes and 56 rows
             grids = int(output_neurons / (56 * 4))
             self.cls_dim = (grids, 56, 4)
             self.gridding_num = grids - 1
             self.cls_num_per_lane = 56
 
-        # 3. Instanciar Modelo
+        # 3. Instantiate Model
         self.model = ParsingNet(pretrained=False, cls_dim=self.cls_dim, use_aux=False)
         self.model.to(self.device)
         
-        # 4. INYECCIÓN DE PESOS (FORCE FEED)
+        # 4. WEIGHT INJECTION (FORCE FEED)
         model_state = self.model.state_dict()
         new_state_dict = {}
         
-        # Formas críticas que NECESITAMOS encontrar
+        # Critical shapes that we NEED to find
         target_shapes = {
             'cls.0.weight': (2048, 1800),
             'cls.0.bias': (2048,),
@@ -129,33 +131,33 @@ class UFLDDetector:
         assigned_targets = set()
         matched_backbone = 0
         
-        print("💉 Iniciando inyección de pesos...")
+        print("💉 Starting weight injection...")
         
         for k, v in state_dict.items():
-            # A. Intento de carga normal por nombre (para Backbone)
+            # A. Normal loading attempt by name (for Backbone)
             clean_k = k[7:] if k.startswith('module.') else k
             if clean_k in model_state and v.shape == model_state[clean_k].shape:
                 new_state_dict[clean_k] = v
                 matched_backbone += 1
                 continue
                 
-            # B. Carga por FORMA (Para la Cabeza perdida)
+            # B. Loading by SHAPE (For the missing Head)
             for target_name, target_shape in target_shapes.items():
                 if target_name in assigned_targets: continue
                 
                 if v.shape == target_shape:
-                    print(f"   -> ¡MATCH! Asignando '{k}' a '{target_name}'")
+                    print(f"   -> MATCH! Assigning '{k}' to '{target_name}'")
                     new_state_dict[target_name] = v
                     assigned_targets.add(target_name)
-                    break # Asignado, pasar al siguiente peso del pth
+                    break # Assigned, move to the next weight from pth
 
-        print(f"📊 Backbone cargado: {matched_backbone} capas.")
-        print(f"📊 Cabecera cargada: {len(assigned_targets)}/6 componentes críticos.")
+        print(f"📊 Backbone loaded: {matched_backbone} layers.")
+        print(f"📊 Head loaded: {len(assigned_targets)}/6 critical components.")
         
         self.model.load_state_dict(new_state_dict, strict=False)
         self.model.eval()
 
-        # Generar Anclas
+        # Generate Anchors
         if self.cls_num_per_lane == 56: 
             self.row_anchor = np.array([64, 68, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112,
                             116, 120, 124, 128, 132, 136, 140, 144, 148, 152, 156, 160,

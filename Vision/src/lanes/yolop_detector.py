@@ -63,7 +63,10 @@ class YOLOPDetector:
             overlay_da[da_mask == 1] = [0, 255, 0]
             # Usamos una mezcla suave solo donde hay detección
             mask_bool = da_mask == 1
-            result[mask_bool] = cv2.addWeighted(result[mask_bool], 0.6, overlay_da[mask_bool], 0.4, 0)
+            if np.any(mask_bool): # Only apply if there are actual pixels to modify
+                # Apply addWeighted to the full images and then use np.where to blend
+                blended_segment = cv2.addWeighted(result, 0.6, overlay_da, 0.4, 0)
+                result = np.where(mask_bool[:, :, None], blended_segment, result)
 
         # Capa de Líneas (Roja - Opcional)
         if show_lanes:
@@ -79,26 +82,30 @@ class YOLOPDetector:
         if show_lane_points:
             contours, _ = cv2.findContours(ll_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             for cnt in contours:
-                area = cv2.contourArea(cnt)
-                
-                # FILTRO 1: Ruido pequeño
-                if area < 400: continue
-                
-                # FILTRO 2: El "Marco" de la imagen
-                # Si el contorno es casi tan grande como la imagen entera, es un error del modelo
-                x, y, w, h = cv2.boundingRect(cnt)
-                if w > w_orig * 0.95 and h > h_orig * 0.95:
-                    continue # Ignoramos el marco completo
-                
-                epsilon = 0.02 * cv2.arcLength(cnt, True)
-                approx = cv2.approxPolyDP(cnt, epsilon, True)
-                
-                # Dibujar línea cyan
-                cv2.drawContours(result, [approx], -1, (255, 255, 0), 3)
-                
-                # Dibujar puntos
-                for point in approx:
-                    px, py = point[0]
-                    cv2.circle(result, (px, py), 5, (0, 0, 255), -1)
+                try:
+                    area = cv2.contourArea(cnt)
+                    
+                    # FILTRO 1: Ruido pequeño
+                    if area < 400: continue
+                    
+                    # FILTRO 2: El "Marco" de la imagen
+                    # Si el contorno es casi tan grande como la imagen entera, es un error del modelo
+                    x, y, w, h = cv2.boundingRect(cnt)
+                    if w > w_orig * 0.95 and h > h_orig * 0.95:
+                        continue # Ignoramos el marco completo
+                    
+                    epsilon = 0.02 * cv2.arcLength(cnt, True)
+                    approx = cv2.approxPolyDP(cnt, epsilon, True)
+                    
+                    # Dibujar línea cyan
+                    cv2.drawContours(result, [approx], -1, (255, 255, 0), 3)
+                    
+                    # Dibujar puntos
+                    for point in approx:
+                        px, py = point[0]
+                        cv2.circle(result, (px, py), 5, (0, 0, 255), -1)
+                except Exception as e:
+                    print(f"DEBUG YOLOP ERROR in contour processing: {e}, contour: {cnt}")
+                    continue # Skip this problematic contour
 
         return result, latency

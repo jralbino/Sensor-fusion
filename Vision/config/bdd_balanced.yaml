@@ -1,8 +1,8 @@
 # Ruta base de tu nuevo dataset balanceado
-path: data/raw/bdd100k/balanced_train # Ruta relativa desde la carpeta Vision/
+path: /home/jolux/sensor-fusion-bdd/Sensor-fusion/Vision/data/raw/bdd100k
 
-train: images # YOLO buscará en path/images
-val: ../images/100k/val # Sube un nivel desde path para ir a la validación original
+train: images/100k/train
+val: images/100k/val
 
 # Clases
 names:

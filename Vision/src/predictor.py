@@ -3,16 +3,16 @@ import cv2
 import time
 from pathlib import Path
 from tqdm import tqdm
-from detectors.object_detector import ObjectDetector
+from Vision.src.detectors.object_detector import ObjectDetector
 
 class BatchPredictor:
     def __init__(self, images_dir, output_dir):
         """
-        Inicializa el gestor de predicciones por lotes.
+        Initializes the batch prediction manager.
         
         Args:
-            images_dir (str): Ruta a la carpeta de imágenes originales.
-            output_dir (str): Ruta donde se guardarán los JSONs resultantes.
+            images_dir (str): Path to the folder of original images.
+            output_dir (str): Path where the resulting JSONs will be saved.
         """
         self.images_dir = Path(images_dir)
         self.output_dir = Path(output_dir)
@@ -20,46 +20,46 @@ class BatchPredictor:
 
     def run_inference(self, model_name, model_path, conf=0.5, iou=0.45, limit=None):
         """
-        Ejecuta la inferencia sobre el dataset y guarda el JSON.
+        Executes inference on the dataset and saves the JSON.
         
         Args:
-            model_name (str): Nombre identificador (ej: "YOLO11-X").
-            model_path (str): Ruta al archivo .pt (ej: "models/yolo11x.pt").
-            limit (int, opcional): Número máximo de imágenes a procesar (para pruebas rápidas).
+            model_name (str): Identifier name (e.g., "YOLO11-X").
+            model_path (str): Path to the .pt file (e.g., "models/yolo11x.pt").
+            limit (int, optional): Maximum number of images to process (for quick tests).
         
         Returns:
-            str: Ruta del archivo JSON generado.
+            str: Path to the generated JSON file.
         """
-        # 1. Definir nombre de salida
-        # Limpiamos el nombre del modelo para usarlo en el archivo
+        # 1. Define output name
+        # Clean the model name for use in the file
         safe_name = model_name.lower().replace(" ", "").replace("-", "")
         json_filename = f"{safe_name}_conf{int(conf*100)}.json"
         output_json_path = self.output_dir / json_filename
 
-        # Si ya existe y no queremos sobreescribir, podríamos retornar aquí.
-        # Por ahora, sobreescribimos siempre para tener datos frescos.
+        # If it already exists and we don't want to overwrite, we could return here.
+        # For now, we always overwrite to have fresh data.
         
-        print(f"\n🚀 Iniciando Inferencia: {model_name}")
-        print(f"   Modelo: {model_path}")
+        print(f"\n🚀 Starting Inference: {model_name}")
+        print(f"   Model: {model_path}")
         print(f"   Output: {output_json_path}")
 
-        # 2. Cargar Detector
-        # Manejo de error si el modelo no existe
+        # 2. Load Detector
+        # Error handling if model does not exist
         if not Path(model_path).exists():
-            print(f"❌ Error: El modelo no existe en: {model_path}")
+            print(f"❌ Error: Model does not exist at: {model_path}")
             return None
 
         detector = ObjectDetector(model_path=model_path, conf=conf, iou=iou)
         
-        # 3. Listar imágenes
+        # 3. List images
         image_paths = sorted(list(self.images_dir.glob("*.jpg")))
         
-        # APLICAR LIMITE (Para pruebas rápidas)
+        # APPLY LIMIT (For quick tests)
         if limit:
-            print(f"⚠️  Modo prueba: Procesando solo las primeras {limit} imágenes.")
+            print(f"⚠️  Test mode: Processing only the first {limit} images.")
             image_paths = image_paths[:limit]
         else:
-            print(f"📊 Procesando dataset completo ({len(image_paths)} imágenes).")
+            print(f"📊 Processing full dataset ({len(image_paths)} images).")
         
         params = detector.get_parameters()
         for key, value in params.items():
@@ -71,10 +71,10 @@ class BatchPredictor:
             "results": []
         }
 
-        # 4. Loop de inferencia
+        # 4. Inference loop
         start_global = time.time()
         
-        for img_p in tqdm(image_paths, desc=f"Inferencias {model_name}"):
+        for img_p in tqdm(image_paths, desc=f"Inferences {model_name}"):
             img = cv2.imread(str(img_p))
             if img is None: continue
             
@@ -87,9 +87,9 @@ class BatchPredictor:
             })
 
         total_time = time.time() - start_global
-        print(f"✅ Finalizado en {total_time:.2f}s. Guardando JSON...")
+        print(f"✅ Finished in {total_time:.2f}s. Saving JSON...")
 
-        # 5. Guardar
+        # 5. Save
         with open(output_json_path, 'w') as f:
             json.dump(experiment_data, f, indent=4, default=str)
             

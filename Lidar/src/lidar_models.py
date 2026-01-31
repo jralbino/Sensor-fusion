@@ -2,67 +2,74 @@ import sys
 import numpy as np
 from pathlib import Path
 
-from lidar_utils import setup_mocks
-
-# Configurar mocks antes de importar mmdet3d
+# The setup_mocks is imported here and should remain.
+from .lidar_utils import setup_mocks
 setup_mocks()
 
+# Import the consolidated path manager
+from config.utils.path_manager import path_manager
+
 from mmdet3d.utils import register_all_modules
-from detectors.pointpillars import PointPillarsDetector
-from detectors.centerpoint import CenterPointDetector
+from mmdet3d.apis import init_model, inference_detector
 
 try: register_all_modules(init_default_scope=False)
 except: pass
 
 class ModelManager:
-    def __init__(self, base_dir):
-        self.base_dir = Path(base_dir)
-        self.ckpt_dir = self.base_dir / "checkpoints"
-        self.configs_dir = self.base_dir / "configs"
+    def __init__(self): # Removed base_dir parameter
+        self.base_dir = path_manager.BASE_DIR # Use path_manager.BASE_DIR
+        self.ckpt_dir = path_manager.get("lidar_checkpoints") # Use path_manager
+        self.configs_dir = path_manager.get("lidar_configs") # Use path_manager
         self.models = {}
 
+    def _check_files(self, cfg_path, ckpt_path):
+        missing = []
+        if not Path(cfg_path).exists(): missing.append(f"Config: {cfg_path}")
+        if not Path(ckpt_path).exists(): missing.append(f"Weights: {ckpt_path}")
+        if missing:
+            raise FileNotFoundError(f"❌ Missing files:\n" + "\n".join(missing))
+
     def load_model(self, model_name):
-        if model_name == 'pointpillars':
-            # print("🏗️ Cargando PointPillars...")
-            cfg = self.configs_dir / "pointpillars/pointpillars_hv_secfpn_sbn-all_8xb4-2x_nus-3d.py"
-            ckpt = self.ckpt_dir / "pointpillars_nus.pth"
-            self.models['pp'] = PointPillarsDetector(str(cfg), str(ckpt))
+        key = model_name.lower().replace("-", "").replace(" ", "").replace("_", "")
+        cfg, ckpt, m_key = None, None, None
+
+        if 'pointpillars' in key or key == 'pp':
+            cfg = path_manager.get_model_detail("pointpillars_cfg") # Use path_manager
+            ckpt = path_manager.get_model_detail("pointpillars_ckpt") # Use path_manager
+            m_key = 'pp'
             
-        elif model_name == 'centerpoint':
-            # print("🎯 Cargando CenterPoint...")
-            cfg = self.configs_dir / "centerpoint/centerpoint_voxel0075_second_secfpn_head-circlenms_8xb4-cyclic-20e_nus-3d.py"
-            ckpt = self.ckpt_dir / "centerpoint_nus.pth"
-            self.models['cp'] = CenterPointDetector(str(cfg), str(ckpt))
+        elif 'centerpoint' in key or key == 'cp':
+            cfg = path_manager.get_model_detail("centerpoint_cfg") # Use path_manager
+            ckpt = path_manager.get_model_detail("centerpoint_ckpt") # Use path_manager
+            m_key = 'cp'
+            
+        else:
+            raise ValueError(f"Model '{model_name}' not recognized.")
+
+        self._check_files(cfg, ckpt)
+        self.models[m_key] = init_model(str(cfg), str(ckpt), device='cuda:0')
 
     def predict(self, model_key, lidar_path):
-        """Ejecuta inferencia y limpia la salida."""
         model = self.models.get(model_key)
-        if not model: raise ValueError(f"Modelo {model_key} no cargado")
+        if not model: 
+            raise ValueError(f"Model {model_key} not loaded. Call load_model first.")
         
-        raw_dets = model.detect(lidar_path)
+        result, data = inference_detector(model, lidar_path)
         
-        # Normalizar salida a lista de dicts
+        pred_instances = result.pred_instances_3d
+        bboxes_3d = pred_instances.bboxes_3d.tensor.cpu().numpy()
+        scores = pred_instances.scores_3d.cpu().numpy()
+        labels = pred_instances.labels_3d.cpu().numpy()
+        
         clean_results = []
-        for d in raw_dets:
-            # Soporte para diferentes formatos de salida de mmdet
-            box = d['box_3d'] if 'box_3d' in d else d['boxes_3d']
-            score = float(d['score']) if 'score' in d else float(d['scores_3d'])
-            label = int(d['label']) if 'label' in d else int(d['labels_3d'])
-            
-            # Convertir Tensores/Listas a Numpy para manipulación matemática
-            if hasattr(box, 'numpy'):
-                box = box.numpy()
-            if isinstance(box, list):
-                box = np.array(box)
-
-            # --- CORRECCIÓN DE HEADING PARA CENTERPOINT ---
-            # CenterPoint a veces tiene el Yaw invertido respecto a NuScenes/OpenCV
+        for box, score, label in zip(bboxes_3d, scores, labels):
             if model_key == 'cp':
                  box[6] = -box[6] 
-
+            
             clean_results.append({
-                "box": box.tolist(), # <--- CORRECCIÓN: Convertir numpy a lista para JSON
-                "score": score, 
-                "label": label
+                "box": box.tolist(), 
+                "score": float(score), 
+                "label": int(label),
+                "model": model_key
             })
         return clean_results

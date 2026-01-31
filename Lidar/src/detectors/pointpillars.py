@@ -4,14 +4,14 @@ import numpy as np
 
 class PointPillarsDetector(BaseLidarDetector):
     def load_model(self):
-        print(f"🏗️ Cargando PointPillars desde {self.checkpoint_path}...")
+        print(f"🏗️ Loading PointPillars from {self.checkpoint_path}...")
         return init_model(self.config_path, self.checkpoint_path, device=self.device)
 
     def detect(self, pcd_path):
-        # MMDetection3D maneja la lectura del bin internamente en 'inference_detector'
+        # MMDetection3D handles reading the bin internally in 'inference_detector'
         result, data = inference_detector(self.model, pcd_path)
         
-        # Procesar salida (pred_instances_3d)
+        # Process output (pred_instances_3d)
         pred_instances = result.pred_instances_3d
         bboxes_3d = pred_instances.bboxes_3d.tensor.cpu().numpy() # [x, y, z, l, w, h, rot]
         scores = pred_instances.scores_3d.cpu().numpy()
@@ -19,7 +19,7 @@ class PointPillarsDetector(BaseLidarDetector):
         
         detections = []
         for box, score, label in zip(bboxes_3d, scores, labels):
-            if score > 0.3: # Filtro básico de confianza
+            if score > 0.3: # Basic confidence filter
                 detections.append({
                     "box_3d": box.tolist(), # [x, y, z, dx, dy, dz, rot]
                     "score": float(score),

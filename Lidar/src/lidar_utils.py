@@ -1,6 +1,9 @@
 import sys
 from unittest.mock import MagicMock
 from pathlib import Path
+
+from config.utils.path_manager import path_manager # Import the consolidated path manager
+
 from nuscenes.nuscenes import NuScenes
 
 def setup_mocks():
@@ -13,8 +16,13 @@ def setup_mocks():
         sys.modules[mod_name] = MagicMock()
 
 class DataLoader:
-    def __init__(self, root='Fusion/data/sets/nuscenes', version='v1.0-mini'):
-        print("🌍 Inicializando NuScenes...")
+    def __init__(self, root: str = None, version: str = None):
+        if root is None:
+            root = str(path_manager.get_data_detail("nuscenes_base"))
+        if version is None:
+            version = path_manager.get_user_setting("nuscenes_version")
+            
+        print("🌍 Initializing NuScenes...")
         self.nusc = NuScenes(version=version, dataroot=root, verbose=False)
 
     def get_sample_data(self, sample_token):
@@ -33,6 +41,6 @@ class DataLoader:
             'cs_cam': cs_cam,
             'pose_cam': self.nusc.get('ego_pose', sd_cam['ego_pose_token']),
             'intrinsic': cs_cam['camera_intrinsic'],
-            # --- NUEVO: Extraer coeficientes de distorsión ---
+            # --- NEW: Extract distortion coefficients ---
             'distortion': cs_cam.get('camera_distortion', [0,0,0,0,0]) 
         }

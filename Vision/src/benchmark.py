@@ -2,7 +2,7 @@ from ultralytics import YOLO, RTDETR
 import sys
 import os
 from pathlib import Path
-from utils.paths import PathManager
+from config.utils.path_manager import path_manager
 
 
 class ModelBenchmark:
@@ -11,16 +11,16 @@ class ModelBenchmark:
 
     def run(self, models_config):
         print("\n" + "="*40)
-        print("--- FASE 3: BENCHMARK FORMAL (mAP) ---")
+        print("--- PHASE 3: FORMAL BENCHMARK (mAP) ---")
         print("="*40)
 
         results = {}
         
-        output_project = PathManager.get_data_path("output_vision")
+        output_project = path_manager.get("output_vision")
 
         for name, path in models_config:
-            print(f"\n📊 Evaluando Modelo: {name}")
-            print(f"   Archivo: {path}")
+            print(f"\n📊 Evaluating Model: {name}")
+            print(f"   File: {path}")
             
             try:
                 if "rtdetr" in path.stem:
@@ -28,7 +28,7 @@ class ModelBenchmark:
                 else:
                     model = YOLO(path)
                 
-                # --- CORRECCIÓN DEFINITIVA DE RUTAS ---
+                # --- DEFINITIVE PATH CORRECTION ---
                 metrics = model.val(
                     data=self.data_yaml, 
                     split='val', 
@@ -36,13 +36,13 @@ class ModelBenchmark:
                     verbose=False,
                     plots=False,
                     
-                    # 1. 'project': Ruta base absoluta/segura (evita ./runs)
+                    # 1. 'project': Absolute/secure base path (avoids ./runs)
                     project=str(output_project),  
                     
-                    # 2. 'name': Subcarpeta (ej: benchmark_YOLO11-L)
+                    # 2. 'name': Subfolder (e.g., benchmark_YOLO11-L)
                     name=f'benchmark_{name}',
                     
-                    # 3. 'exist_ok': Evita crear benchmark_YOLO11-L2, L3, etc.
+                    # 3. 'exist_ok': Prevents creating benchmark_YOLO11-L2, L3, etc.
                     exist_ok=True 
                 )
                 
@@ -51,7 +51,7 @@ class ModelBenchmark:
                 precision = metrics.box.mp
                 recall = metrics.box.mr
                 
-                print(f"   ✅ Resultados {name}:")
+                print(f"   ✅ Results {name}:")
                 print(f"   👉 mAP@50-95: {map50_95:.4f}")
                 print(f"   👉 mAP@50:    {map50:.4f}")
                 print(f"   👉 Precision: {precision:.4f}")
@@ -65,6 +65,6 @@ class ModelBenchmark:
                 }
                 
             except Exception as e:
-                print(f"❌ Error evaluando {name}: {e}")
+                print(f"❌ Error evaluating {name}: {e}")
 
         return results

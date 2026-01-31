@@ -7,15 +7,15 @@ import time
 class SegFormerDetector:
     def __init__(self, device=None):
         """
-        Detector de Segmentación basado en NVIDIA SegFormer.
-        Modelo: nvidia/segformer-b0-finetuned-cityscapes-1024-1024
+        Segmentation detector based on NVIDIA SegFormer.
+        Model: nvidia/segformer-b0-finetuned-cityscapes-1024-1024
         
-        Este modelo es SOTA (State-of-the-Art) en segmentación de escenas.
-        Lo usaremos para encontrar el 'Drivable Area' (Carretera) con precisión NVIDIA,
-        y luego extraeremos las líneas dentro de esa área.
+        This model is SOTA (State-of-the-Art) in scene segmentation.
+        We will use it to find the 'Drivable Area' (Road) with NVIDIA precision,
+        and then extract the lines within that area.
         """
         self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"🐉 Cargando NVIDIA SegFormer en {self.device}...")
+        print(f"🐉 Loading NVIDIA SegFormer on {self.device}...")
         
         model_name = "nvidia/segformer-b0-finetuned-cityscapes-1024-1024"
         
@@ -25,75 +25,75 @@ class SegFormerDetector:
             self.model.to(self.device)
             self.model.eval()
         except Exception as e:
-            print(f"❌ Error cargando SegFormer: {e}")
-            print("Intenta: pip install transformers")
+            print(f"❌ Error loading SegFormer: {e}")
+            print("Try: pip install transformers")
             raise e
 
-        # En Cityscapes, la clase 'Road' (Carretera) es el índice 0.
+        # In Cityscapes, the 'Road' class is index 0.
         self.road_class_index = 0
 
     def detect(self, img_bgr, **kwargs):
         """
-        Retorna:
-            result: Imagen fusionada (Drivable Area verde + Líneas Cyan).
-            latency: Tiempo en ms.
+        Returns:
+            result: Fused image (Green Drivable Area + Cyan Lines).
+            latency: Time in ms.
         """
         t_start = time.time()
         
         h_orig, w_orig, _ = img_bgr.shape
         
-        # 1. Preproceso (HuggingFace Processor se encarga del resize y norm)
+        # 1. Preprocessing (HuggingFace Processor handles resize and norm)
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         inputs = self.processor(images=img_rgb, return_tensors="pt").to(self.device)
 
-        # 2. Inferencia
+        # 2. Inference
         with torch.no_grad():
             outputs = self.model(**inputs)
             
-        # 3. Post-proceso (Upsampling a tamaño original)
+        # 3. Post-processing (Upsampling to original size)
         logits = outputs.logits
         upsampled_logits = torch.nn.functional.interpolate(
             logits,
-            size=(h_orig, w_orig), # Restaurar tamaño original
+            size=(h_orig, w_orig), # Restore original size
             mode="bilinear",
             align_corners=False,
         )
         
-        # Argmax para obtener la clase ganadora en cada pixel
+        # Argmax to get the winning class for each pixel
         pred_seg = upsampled_logits.argmax(dim=1)[0] # Shape: (H, W)
         
-        # Extraer máscara de carretera (Clase 0)
+        # Extract road mask (Class 0)
         road_mask = (pred_seg == self.road_class_index).byte().cpu().numpy()
 
         t_end = time.time()
         latency = (t_end - t_start) * 1000
 
-        # 4. Visualización Avanzada
-        # A) Pinta el Área de Conducción (Verde NVIDIA)
+        # 4. Advanced Visualization
+        # A) Paint Drivable Area (NVIDIA Green)
         overlay = np.zeros_like(img_bgr, dtype=np.uint8)
         overlay[road_mask == 1] = [0, 255, 0]
         
-        # B) Truco: Extraer líneas DENTRO de la carretera usando bordes
-        # Si ya sabemos dónde está la carretera, las líneas blancas/amarillas dentro de ella son carriles.
+        # B) Trick: Extract lines INSIDE the road using edges
+        # If we already know where the road is, white/yellow lines within it are lanes.
         if road_mask.sum() > 0:
-            # Recortamos solo la carretera de la imagen original
+            # Crop only the road from the original image
             road_area = cv2.bitwise_and(img_bgr, img_bgr, mask=road_mask)
             
-            # Convertimos a escala de grises y aumentamos contraste
+            # Convert to grayscale and increase contrast
             gray_road = cv2.cvtColor(road_area, cv2.COLOR_BGR2GRAY)
             
-            # Filtro de líneas brillantes (Umbral adaptativo o fijo alto)
-            # Las líneas suelen ser mucho más brillantes que el asfalto
+            # Bright line filter (Adaptive or fixed high threshold)
+            # Lines are usually much brighter than asphalt
             _, lines_mask = cv2.threshold(gray_road, 180, 255, cv2.THRESH_BINARY)
             
-            # Limpiar ruido (Erosión + Dilatación)
+            # Clean noise (Erosion + Dilation)
             kernel = np.ones((3,3), np.uint8)
             lines_mask = cv2.morphologyEx(lines_mask, cv2.MORPH_OPEN, kernel)
             
-            # Pintar líneas en Rojo/Cyan sobre el overlay
+            # Paint lines in Red/Cyan on the overlay
             overlay[lines_mask == 255] = [255, 255, 0] # Cyan
 
-        # Mezclar todo
+        # Blend everything
         result = cv2.addWeighted(img_bgr, 0.8, overlay, 0.4, 0)
         
         return result, latency
