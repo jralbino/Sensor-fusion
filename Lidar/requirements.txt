@@ -1,4 +1,48 @@
-mmdet3d
-open3d
-numba
-pyquaternion
+# LiDAR 3D Detection System v2.0 - Dependencies
+
+# Core
+numpy>=1.23.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Point Cloud Processing
+open3d>=0.17.0
+scipy>=1.10.0
+scikit-learn>=1.2.0
+
+# Data Processing
+pandas>=1.5.0
+pyyaml>=6.0
+tqdm>=4.65.0
+
+# Datasets
+nuscenes-devkit>=1.1.0
+pyquaternion>=0.9.0
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.14.0
+opencv-python>=4.7.0
+pillow>=9.5.0
+streamlit>=1.30.0
+
+# Geometry
+shapely>=2.0.0
+
+# Training
+tensorboard>=2.12.0
+wandb>=0.15.0  # Optional
+
+# Evaluation
+pycocotools>=2.0.6
+
+# Sparse Convolutions (for SECOND detector)
+spconv-cu120>=2.3.0  # For CUDA 12.x; use spconv-cu118 for CUDA 11.8
+
+# Optional: Speed up
+# numba>=0.56.0
+
+# Development
+pytest>=7.3.0
+black>=23.3.0
+flake8>=6.0.0
