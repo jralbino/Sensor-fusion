@@ -1,83 +1,163 @@
-# 🚗 Multi-Modal Sensor Fusion for Autonomous Driving
+# Multi-Modal Sensor Fusion for Autonomous Driving
 
-![Project Banner](assets/banner_demo.png)
-*(Insert an impactful image combining vision and data here)*
+Multi-modal autonomous driving perception system with three modules: **LiDAR** (3D detection + tracking), **Vision** (2D detection + lane segmentation + tracking), and **Fusion** (LiDAR-to-camera projection). Uses NuScenes mini for 3D and BDD100K for 2D.
 
-A comprehensive repository for autonomous driving perception. This project implements **Computer Vision**, **Lidar/Radar Processing**, and **Sensor Fusion** pipelines for robust object and lane detection in complex environments (BDD100K, NuScenes). The codebase has been refactored for improved modularity, maintainability, and consistent path management using a centralized `PathManager`.
+## Modules
 
-## 🌟 Key Features
-*   **Vision:** State-of-the-Art (SOTA) comparative analysis (YOLO11, RT-DETR, YOLOP, PolyLaneNet).
-*   **Lidar:** 3D object detection with PointPillars and CenterPoint.
-*   **Fusion:** Projection of Lidar point clouds onto camera images.
-*   **Training:** Fine-tuning scripts to adapt models to driving datasets.
-*   **Benchmarks:** Automated tools for measuring mAP and Latency.
-*   **Interactive Interface:** Streamlit-based application for visualization and comparison.
+### LiDAR — 3D Object Detection & Tracking
 
-## 🛠️ Installation
+Detects 10 object classes in 3D LiDAR point clouds using pillar-based voxelization and 2D/sparse CNN backbones.
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/jralbino/Sensor-fusion.git
-    cd Sensor-fusion
-    ```
+| Model | Description | Params |
+|-------|-------------|--------|
+| **PointPillars** | Dense 2D CNN backbone, anchor-based head | 4.0M |
+| **SECOND** | Sparse 2D CNN (spconv), same head | 2.1M |
+| **CenterPoint** | Dense backbone, anchor-free heatmap head | 4.4M |
+| **MMDet3D wrappers** | Pretrained PointPillars/SECOND/CenterPoint from MMDetection3D | — |
 
-2.  **Set up a virtual environment:**
-    It is highly recommended to use a virtual environment to manage dependencies.
-    ```bash
-    python -m venv venv
-    
-    # On Windows
-    venv\Scripts\activate
-    # On Linux/macOS
-    source venv/bin/activate
-    ```
+Pipeline: Raw points → Voxelization (0.16m pillars) → VFE → Backbone → Detection head → NMS → Boxes (x,y,z,l,w,h,yaw).
 
-3.  **Install project dependencies (including sub-module specific ones):**
-    Install the project in editable mode, along with all extra dependencies for Vision, Lidar, and Fusion modules. This command will install everything defined in `setup.py` and the respective `requirements.txt` files.
-    ```bash
-    pip install -e ".[vision,lidar,fusion]"
-    ```
-    *(Note: If you only need specific modules, you can install them individually, e.g., `pip install -e ".[vision]"`)*
+Multi-frame **ByteTrack** tracking with ego-motion compensation and Kalman-filtered 3D states.
 
-## 📦 Required Models
-For full project functionality, download the following pre-trained weights and place them in the `Vision/models/` and `Lidar/checkpoints/` directories as specified by the `config/config.yaml` file. The `PathManager` will locate them automatically.
+Visualizations: BEV (PNG), interactive 3D (Plotly HTML), 6-camera projection (PNG), and Streamlit dashboard.
 
-### Vision Models (Place in `Vision/models/`)
-| Model       | Description                 | Files                                      |
-|-------------|-----------------------------|--------------------------------------------|
-| **YOLOv11** | General Object Detection    | `yolo11l.pt`, `yolo11x.pt`                 |
-| **RT-DETR** | Transformer-based Detector  | `rtdetr-l.pt`, `rtdetr-bdd-best.pt`        |
-| **UFLD**    | Fast Lane Detection         | `tusimple_18.pth`                          |
-| **PolyLaneNet** | Lane Regression Model     | `model_2305.pt`                            |
+See [Lidar/README.md](Lidar/README.md) for full details.
 
-### Lidar Models (Place in `Lidar/checkpoints/`)
-| Model       | Description                 | Files                                      |
-|-------------|-----------------------------|--------------------------------------------|
-| **PointPillars** | 3D Object Detector (Lidar) | `pointpillars_nus.pth`                     |
-| **CenterPoint** | 3D Object Detector (Lidar) | `centerpoint_nus.pth`                      |
+### Vision — 2D Object Detection & Lane Segmentation
 
-## 🚀 Quick Start & Usage
+Compares multiple SOTA detectors and lane models on BDD100K driving images.
 
-### Running the Vision Application
-The Vision component includes a Streamlit application for interactive object and lane detection. **Always run Streamlit apps from the project root directory.**
+| Task | Models |
+|------|--------|
+| **Object Detection** | YOLO11 (L/X), RT-DETR (L, BDD-finetuned, people-finetuned) |
+| **Lane Detection** | YOLOP (drivable area + lanes), PolyLaneNet, UFLD |
+
+Multi-frame **ByteTrack** tracking for consistent object IDs across video sequences.
+
+Includes Streamlit app, batch inference, benchmark pipeline, and comparative video generation.
+
+See [Vision/README.md](Vision/README.md) for full details.
+
+### Fusion — LiDAR-Camera Projection
+
+Projects LiDAR 3D points onto camera images using NuScenes calibration matrices (extrinsics + intrinsics). Demonstrates the spatial alignment between sensors.
+
+### Tracking — ByteTrack Multi-Object Tracking
+
+Shared `tracking/` module used by both LiDAR (3D) and Vision (2D) pipelines.
+
+- Two-threshold association (high/low confidence) with Hungarian matching
+- 2D Kalman filter (8-dim state: cx, cy, aspect_ratio, h + velocities)
+- 3D Kalman filter (10-dim state: x, y, z, l, w, h, yaw + velocities)
+- Axis-aligned BEV IoU for 3D, standard IoU for 2D
+- No external dependencies beyond numpy + scipy
+
+## Installation
+
+Each module has its own Python 3.11 virtual environment with pinned dependencies in `requirements.txt`.
+
+### Vision Module
+
 ```bash
-# Ensure your virtual environment is active
-# From the project root directory:
-streamlit run Vision/app.py
+cd Vision
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### Running the Lidar Pipeline
-The Lidar component has a pipeline for processing Lidar data, running inference, and generating visualizations.
+### LiDAR Module (needs spconv, nuscenes-devkit, CUDA)
+
 ```bash
-# Ensure your virtual environment is active
-# From the project root directory:
-python Lidar/main.py
+cd Lidar
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### Running the Fusion Demonstration
-The Fusion component includes a script to demonstrate the projection of Lidar points onto a camera image.
+### Data Setup
+
+- **NuScenes mini**: Download from [nuscenes.org](https://www.nuscenes.org/nuscenes#download) → extract to `Fusion/data/sets/nuscenes/`
+- **BDD100K**: Validation images → `Vision/data/raw/bdd100k/images/100k/val/`
+
+## Quick Start
+
 ```bash
-# Ensure your virtual environment is active
-# From the project root directory:
+# --- LiDAR ---
+# Prepare data (generates pickle info files)
+Lidar/venv/bin/python Lidar/scripts/prepare_data.py \
+    --data-root Fusion/data/sets/nuscenes --version v1.0-mini
+
+# Single-scene detection + visualization
+Lidar/venv/bin/python Lidar/main.py \
+    --data-root Fusion/data/sets/nuscenes \
+    --model mmdet3d_pointpillars --sample-idx 0
+
+# Multi-frame tracking (BEV PNGs with track IDs + trajectories)
+Lidar/venv/bin/python Lidar/main.py \
+    --data-root Fusion/data/sets/nuscenes \
+    --model mmdet3d_pointpillars --sample-idx 0 \
+    --track --num-frames 10
+
+# Training
+Lidar/venv/bin/python Lidar/train_simple.py \
+    --data-root Fusion/data/sets/nuscenes \
+    --model pointpillars --num-epochs 20 --batch-size 2
+
+# Streamlit dashboard (BEV, 3D, cameras, tracking)
+cd Lidar && venv/bin/streamlit run app.py
+
+# --- Vision ---
+# Interactive Streamlit app (detection + lanes + tracking)
+Vision/venv/bin/streamlit run Vision/app.py
+
+# Batch processing with videos
+Vision/venv/bin/python Vision/main.py
+
+# Batch tracking (outputs tracked JSON)
+Vision/venv/bin/python Vision/main.py --track --limit 50
+
+# --- Fusion ---
 python Fusion/src/lidar_to_camera.py
+
+# --- Tests ---
+Lidar/venv/bin/python -m pytest tracking/tests/ -v
+Lidar/venv/bin/python -m pytest Lidar/tests/ -v
+Vision/venv/bin/python -m pytest Vision/tests/ -v
+```
+
+## Configuration
+
+All paths are managed through `config/config.yaml` → `config/utils/path_manager.py` (PathManager singleton). Paths are relative to the project root.
+
+## Project Structure
+
+```
+Sensor-fusion/
+├── Lidar/                  # 3D detection module (own venv)
+│   ├── app.py              # Streamlit dashboard
+│   ├── main.py             # Detection + tracking pipeline
+│   ├── train_simple.py     # Training with TensorBoard
+│   ├── evaluate.py         # mAP + NDS evaluation
+│   ├── visualize.py        # BEV visualization
+│   ├── visualize_3d.py     # 3D + camera projection
+│   └── src/                # Models, losses, data loading
+├── Vision/                 # 2D detection module (own venv)
+│   ├── app.py              # Streamlit app
+│   ├── main.py             # Batch inference + tracking
+│   ├── dashboard_app.py    # Benchmark dashboard
+│   ├── run_benchmark.py    # Performance benchmarks
+│   └── src/                # Detectors, lanes, utilities
+├── Fusion/                 # LiDAR-camera projection
+│   └── src/lidar_to_camera.py
+├── tracking/               # ByteTrack MOT (shared)
+│   ├── bytetrack.py        # Core association logic
+│   ├── kalman_2d.py        # 2D Kalman filter
+│   ├── kalman_3d.py        # 3D Kalman filter
+│   ├── tracker_2d.py       # ByteTracker2D (xyxy boxes)
+│   ├── tracker_3d.py       # ByteTracker3D (7-param boxes)
+│   └── tests/              # Unit tests
+├── config/                 # Centralized path management
+│   ├── config.yaml
+│   └── utils/path_manager.py
+└── README.md
 ```

@@ -25,8 +25,11 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 LIDAR_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = LIDAR_DIR.parent
 if str(LIDAR_DIR) not in sys.path:
     sys.path.insert(0, str(LIDAR_DIR))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 CLASS_NAMES = [
     'car', 'truck', 'construction_vehicle', 'bus', 'trailer',
@@ -119,6 +122,10 @@ def parse_args():
     p.add_argument('--nms-iou', type=float, default=0.3)
     p.add_argument('--output-dir', default=None,
                    help='Output directory (default: Lidar/outputs/demo/<model>)')
+    p.add_argument('--track', action='store_true',
+                   help='Enable multi-frame tracking with ByteTrack')
+    p.add_argument('--num-frames', type=int, default=20,
+                   help='Number of frames for tracking mode (default: 20)')
     args = p.parse_args()
 
     # Model-specific default score threshold
@@ -129,6 +136,171 @@ def parse_args():
             args.score_thresh = 0.15
 
     return args
+
+
+def iterate_scene_samples(nusc, start_idx, num_frames):
+    """Yield (sample_idx, sample_token) following the sample['next'] chain."""
+    sample = nusc.sample[start_idx]
+    for i in range(num_frames):
+        yield start_idx + i, sample['token']
+        if not sample['next']:
+            break
+        sample = nusc.get('sample', sample['next'])
+
+
+def run_tracking(args, nusc, data_root, out_dir, device, model_label, checkpoint):
+    """Run multi-frame tracking and save per-frame BEV PNGs."""
+    from visualize_3d import load_sample_data, make_transform_matrix
+    from visualize import render_bev
+    from tracking import ByteTracker3D
+
+    track_dir = out_dir / 'tracking'
+    track_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load model
+    model = None
+    if checkpoint:
+        print(f"Loading {args.model} model from {checkpoint}...")
+        model = load_model(args.model, checkpoint, device)
+
+    # Determine sweeps for mmdet3d models
+    sweeps_num = 0
+    if args.model == 'mmdet3d_centerpoint':
+        sweeps_num = 9
+    elif args.model in ('mmdet3d', 'mmdet3d_pointpillars', 'mmdet3d_second'):
+        sweeps_num = 9
+
+    bev_range = [-60, -60, -5, 60, 60, 3]
+
+    tracker = ByteTracker3D(
+        high_thresh=args.score_thresh * 0.8,
+        low_thresh=args.score_thresh * 0.3,
+        match_thresh=0.2,
+        max_age=5,
+        min_hits=1,
+    )
+
+    # Collect ego poses for ego-motion compensation
+    prev_global_to_lidar = None
+    track_histories = {}  # track_id -> list of (x, y)
+    frame_paths = []
+
+    print(f"\nTracking {args.num_frames} frames starting from sample {args.sample_idx}...")
+
+    for frame_i, (sample_idx, sample_token) in enumerate(
+        iterate_scene_samples(nusc, args.sample_idx, args.num_frames)
+    ):
+        print(f"  Frame {frame_i + 1}/{args.num_frames} (sample {sample_idx})...")
+
+        sample_data = load_sample_data(
+            nusc, sample_token, data_root, sweeps_num=sweeps_num,
+        )
+
+        # Compute ego pose transform for this frame
+        sample_rec = nusc.get('sample', sample_token)
+        lidar_sd = nusc.get('sample_data', sample_rec['data']['LIDAR_TOP'])
+        lidar_cs = nusc.get('calibrated_sensor', lidar_sd['calibrated_sensor_token'])
+        ego_pose = nusc.get('ego_pose', lidar_sd['ego_pose_token'])
+        lidar_to_ego = make_transform_matrix(lidar_cs['translation'], lidar_cs['rotation'])
+        ego_to_global = make_transform_matrix(ego_pose['translation'], ego_pose['rotation'])
+        lidar_to_global = ego_to_global @ lidar_to_ego
+        global_to_lidar = np.linalg.inv(lidar_to_global)
+
+        # Ego-motion compensation: transform existing track states to current frame
+        if prev_global_to_lidar is not None and frame_i > 0:
+            for t in tracker.tracks:
+                state = t.get_state()
+                xyz_hom = np.array([state[0], state[1], state[2], 1.0])
+                # prev_lidar -> global -> current_lidar
+                xyz_global = np.linalg.inv(prev_global_to_lidar) @ xyz_hom
+                xyz_cur = global_to_lidar @ xyz_global
+                t.kf.x[0] = xyz_cur[0]
+                t.kf.x[1] = xyz_cur[1]
+                t.kf.x[2] = xyz_cur[2]
+
+        prev_global_to_lidar = global_to_lidar.copy()
+
+        # Run detection
+        if model is not None:
+            det = run_detection(
+                model, sample_data['points'], device,
+                model_type=args.model,
+                score_thresh=args.score_thresh, nms_iou=args.nms_iou,
+            )
+            pred_boxes = det['boxes']
+            pred_labels = det['labels']
+            pred_scores = det['scores']
+        else:
+            pred_boxes = np.empty((0, 7))
+            pred_labels = np.empty(0, dtype=int)
+            pred_scores = np.empty(0)
+
+        # Update tracker
+        if len(pred_boxes) > 0:
+            active_tracks = tracker.update(pred_boxes, pred_scores, pred_labels)
+        else:
+            active_tracks = tracker.update(
+                np.empty((0, 7)), np.empty(0), np.empty(0, dtype=int),
+            )
+
+        # Extract tracked results
+        if active_tracks:
+            tracked_boxes = np.array([t.get_state() for t in active_tracks])
+            tracked_labels = np.array([t.label for t in active_tracks])
+            tracked_scores = np.array([t.score for t in active_tracks])
+            tracked_ids = np.array([t.track_id for t in active_tracks])
+
+            for t in active_tracks:
+                state = t.get_state()
+                track_histories.setdefault(t.track_id, []).append(
+                    (state[0], state[1])
+                )
+        else:
+            tracked_boxes = np.empty((0, 7))
+            tracked_labels = np.empty(0, dtype=int)
+            tracked_scores = np.empty(0)
+            tracked_ids = np.empty(0, dtype=int)
+
+        # Render BEV with track IDs
+        fig_bev = render_bev(
+            sample_data['points'],
+            pred_boxes=tracked_boxes,
+            pred_labels=tracked_labels,
+            pred_scores=tracked_scores,
+            gt_boxes=sample_data['gt_boxes'],
+            gt_labels=sample_data['gt_labels'],
+            title=f'{model_label} Tracking — Frame {frame_i + 1}',
+            pc_range=bev_range,
+            pred_track_ids=tracked_ids if len(tracked_ids) > 0 else None,
+            track_histories=track_histories,
+        )
+        frame_path = track_dir / f'frame_{frame_i:04d}.png'
+        fig_bev.savefig(frame_path, facecolor=fig_bev.get_facecolor())
+        plt.close(fig_bev)
+        frame_paths.append(frame_path)
+
+        n_active = len(active_tracks)
+        n_total = len(tracker.tracks)
+        print(f"    {n_active} active tracks ({n_total} total)")
+
+    # --- Stitch frames into H.264 MP4 video ---
+    import imageio.v3 as iio
+    video_path = out_dir / f'tracking_{args.model}.mp4'
+    if frame_paths:
+        frames = []
+        for fp in frame_paths:
+            img = iio.imread(fp)
+            frames.append(img[:, :, :3])  # ensure RGB, drop alpha if present
+        iio.imwrite(
+            str(video_path),
+            frames,
+            fps=2,
+            codec="libx264",
+            plugin="pyav",
+        )
+        print(f"\nVideo saved: {video_path}")
+
+    print(f"Tracking complete! {len(frame_paths)} frames in {track_dir}/")
 
 
 def main():
@@ -169,6 +341,23 @@ def main():
     sample_token = nusc.sample[args.sample_idx]['token']
     print(f"Sample {args.sample_idx} (token={sample_token[:8]}...)")
 
+    # --- Auto-detect pretrained checkpoint for mmdet3d models ---
+    checkpoint = args.checkpoint
+    if checkpoint is None and args.model in ('mmdet3d', 'mmdet3d_pointpillars', 'mmdet3d_second', 'mmdet3d_centerpoint'):
+        models_dir = LIDAR_DIR / 'models'
+        if args.model in ('mmdet3d', 'mmdet3d_pointpillars', 'mmdet3d_second'):
+            auto_ckpt = models_dir / 'hv_pointpillars_secfpn_sbn-all_4x8_2x_nus-3d_20210826_225857-f19d00a3.pth'
+        else:
+            auto_ckpt = models_dir / 'centerpoint_02pillar_second_secfpn_circlenms_4x8_cyclic_20e_nus_20220811_031844-191a3822.pth'
+        if auto_ckpt.exists():
+            checkpoint = str(auto_ckpt)
+            print(f"Auto-detected pretrained checkpoint: {auto_ckpt.name}")
+
+    # --- Tracking mode ---
+    if args.track:
+        run_tracking(args, nusc, data_root, out_dir, device, model_label, checkpoint)
+        return
+
     # --- Load sample data ---
     # Use multi-sweep loading for mmdet3d models (trained with sweeps)
     sweeps_num = 0
@@ -185,18 +374,6 @@ def main():
                                    sweeps_num=sweeps_num)
     print(f"  Loaded in {time.time() - t0:.1f}s — {len(sample_data['points'])} points, "
           f"{len(sample_data['gt_boxes'])} GT boxes")
-
-    # --- Auto-detect pretrained checkpoint for mmdet3d models ---
-    checkpoint = args.checkpoint
-    if checkpoint is None and args.model in ('mmdet3d', 'mmdet3d_pointpillars', 'mmdet3d_second', 'mmdet3d_centerpoint'):
-        models_dir = LIDAR_DIR / 'models'
-        if args.model in ('mmdet3d', 'mmdet3d_pointpillars', 'mmdet3d_second'):
-            auto_ckpt = models_dir / 'hv_pointpillars_secfpn_sbn-all_4x8_2x_nus-3d_20210826_225857-f19d00a3.pth'
-        else:
-            auto_ckpt = models_dir / 'centerpoint_02pillar_second_secfpn_circlenms_4x8_cyclic_20e_nus_20220811_031844-191a3822.pth'
-        if auto_ckpt.exists():
-            checkpoint = str(auto_ckpt)
-            print(f"Auto-detected pretrained checkpoint: {auto_ckpt.name}")
 
     # --- Run inference ---
     pred_boxes, pred_labels, pred_scores = None, None, None
@@ -231,12 +408,7 @@ def main():
     print("\nGenerating BEV visualization...")
     from visualize import render_bev
     # Use model-appropriate point cloud range for BEV
-    if args.model in ('mmdet3d', 'mmdet3d_pointpillars', 'mmdet3d_second'):
-        bev_range = [-50, -50, -5, 50, 50, 3]
-    elif args.model == 'mmdet3d_centerpoint':
-        bev_range = [-51.2, -51.2, -5, 51.2, 51.2, 3]
-    else:
-        bev_range = None  # default [0, -39.68, -3, 69.12, 39.68, 1]
+    bev_range = [-60, -60, -5, 60, 60, 3]
     fig_bev = render_bev(
         sample_data['points'],
         pred_boxes=pred_boxes,

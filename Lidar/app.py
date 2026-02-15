@@ -15,10 +15,13 @@ import sys
 from pathlib import Path
 from collections import Counter
 
-# Ensure Lidar/ is in sys.path for src imports
+# Ensure Lidar/ and project root are in sys.path
 LIDAR_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = LIDAR_DIR.parent
 if str(LIDAR_DIR) not in sys.path:
     sys.path.insert(0, str(LIDAR_DIR))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import matplotlib
 matplotlib.use('Agg')
@@ -182,6 +185,14 @@ def run_app():
             st.caption(f"Device: {device_str}")
 
         st.divider()
+
+        # Tracking controls
+        st.subheader("Tracking")
+        enable_tracking = st.checkbox("Enable ByteTrack", value=False)
+        if enable_tracking:
+            num_frames = st.slider("Number of frames", 2, 40, 10)
+
+        st.divider()
         st.caption("Built with Streamlit + Plotly")
 
     # Model label for visualization titles
@@ -239,7 +250,13 @@ def run_app():
                 st.write(f"**{cls_name}**: {count}")
 
     # --- Visualization tabs ---
-    tab_bev, tab_3d, tab_cam = st.tabs(["BEV", "3D Interactive", "Camera Projection"])
+    if enable_tracking and use_model:
+        tab_bev, tab_3d, tab_cam, tab_track = st.tabs(
+            ["BEV", "3D Interactive", "Camera Projection", "Tracking"]
+        )
+    else:
+        tab_bev, tab_3d, tab_cam = st.tabs(["BEV", "3D Interactive", "Camera Projection"])
+        tab_track = None
 
     # Tab 1: BEV
     with tab_bev:
@@ -283,6 +300,131 @@ def run_app():
         )
         st.pyplot(fig_cam)
         plt.close(fig_cam)
+
+    # Tab 4: Tracking
+    if tab_track is not None:
+        with tab_track:
+            import tempfile
+            import os
+            import imageio.v3 as iio
+            from tracking import ByteTracker3D
+            from visualize_3d import load_sample_data as _load_sample, make_transform_matrix
+            from main import run_detection, iterate_scene_samples
+
+            tracker = ByteTracker3D(
+                high_thresh=score_thresh * 0.8,
+                low_thresh=score_thresh * 0.3,
+                match_thresh=0.2,
+                max_age=5,
+                min_hits=1,
+            )
+
+            prev_global_to_lidar = None
+            track_histories = {}
+            frame_images = []  # list of numpy RGB images
+
+            model_obj, device = load_model_cached(ckpt_path, device_str, model_type)
+
+            progress = st.progress(0, text="Running tracking...")
+            for frame_i, (sidx, stok) in enumerate(
+                iterate_scene_samples(nusc, sample_idx, num_frames)
+            ):
+                progress.progress(
+                    (frame_i + 1) / num_frames,
+                    text=f"Frame {frame_i + 1}/{num_frames}",
+                )
+                sd = _load_sample(nusc, stok, Path(data_root))
+
+                # Ego pose
+                sr = nusc.get('sample', stok)
+                lsd = nusc.get('sample_data', sr['data']['LIDAR_TOP'])
+                lcs = nusc.get('calibrated_sensor', lsd['calibrated_sensor_token'])
+                epo = nusc.get('ego_pose', lsd['ego_pose_token'])
+                l2e = make_transform_matrix(lcs['translation'], lcs['rotation'])
+                e2g = make_transform_matrix(epo['translation'], epo['rotation'])
+                l2g = e2g @ l2e
+                g2l = np.linalg.inv(l2g)
+
+                if prev_global_to_lidar is not None and frame_i > 0:
+                    for t in tracker.tracks:
+                        state = t.get_state()
+                        xyz_h = np.array([state[0], state[1], state[2], 1.0])
+                        xyz_g = np.linalg.inv(prev_global_to_lidar) @ xyz_h
+                        xyz_c = g2l @ xyz_g
+                        t.kf.x[0] = xyz_c[0]
+                        t.kf.x[1] = xyz_c[1]
+                        t.kf.x[2] = xyz_c[2]
+                prev_global_to_lidar = g2l.copy()
+
+                det = run_detection(
+                    model_obj, sd['points'], device,
+                    model_type=model_type,
+                    score_thresh=score_thresh, nms_iou=nms_iou,
+                )
+                pb, pl, ps = det['boxes'], det['labels'], det['scores']
+
+                if len(pb) > 0:
+                    active = tracker.update(pb, ps, pl)
+                else:
+                    active = tracker.update(
+                        np.empty((0, 7)), np.empty(0), np.empty(0, dtype=int),
+                    )
+
+                if active:
+                    tb = np.array([t.get_state() for t in active])
+                    tl = np.array([t.label for t in active])
+                    ts = np.array([t.score for t in active])
+                    ti = np.array([t.track_id for t in active])
+                    for t in active:
+                        s = t.get_state()
+                        track_histories.setdefault(t.track_id, []).append(
+                            (s[0], s[1])
+                        )
+                else:
+                    tb = np.empty((0, 7))
+                    tl = np.empty(0, dtype=int)
+                    ts = np.empty(0)
+                    ti = None
+
+                fig = render_bev(
+                    sd['points'],
+                    pred_boxes=tb, pred_labels=tl, pred_scores=ts,
+                    gt_boxes=sd['gt_boxes'], gt_labels=sd['gt_labels'],
+                    title=f"{model_label} Tracking — Frame {frame_i + 1}",
+                    pred_track_ids=ti,
+                    track_histories=track_histories,
+                )
+
+                # Render figure to numpy array (RGB)
+                fig.canvas.draw()
+                buf = fig.canvas.buffer_rgba()
+                img_rgba = np.asarray(buf).copy()
+                img_rgb = img_rgba[:, :, :3]  # drop alpha
+                frame_images.append(img_rgb)
+                plt.close(fig)
+
+            progress.empty()
+
+            # Build H.264 MP4 video playable in browsers
+            if frame_images:
+                tmp_path = tempfile.mktemp(suffix='.mp4')
+                iio.imwrite(
+                    tmp_path,
+                    frame_images,
+                    fps=2,
+                    codec="libx264",
+                    plugin="pyav",
+                )
+
+                with open(tmp_path, 'rb') as f:
+                    video_bytes = f.read()
+                os.unlink(tmp_path)
+
+                st.video(video_bytes)
+                st.caption(
+                    f"{len(frame_images)} frames | "
+                    f"{len(track_histories)} unique tracks"
+                )
 
 
 run_app()

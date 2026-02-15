@@ -6,9 +6,16 @@ Usa esta versión si solo quieres visualizaciones sin métricas
 
 import sys
 import yaml
+import json
 import logging
+import argparse
 from pathlib import Path
 from typing import List, Tuple, Optional
+
+# Ensure project root is in sys.path for tracking import
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.utils.path_manager import path_manager
 from config.logging_config import setup_logging
@@ -200,12 +207,109 @@ def main():
     logger.info(f"\n💡 Para benchmarks, ejecuta: python Vision/run_benchmark.py")
 
 
+def run_tracking_batch():
+    """Run tracking over a sequence of images using ByteTracker2D."""
+    import numpy as np
+    from tracking import ByteTracker2D
+
+    parser = argparse.ArgumentParser(description="Vision 2D Tracking")
+    parser.add_argument('--images-dir', default=None, help='Directory of images')
+    parser.add_argument('--model', default='YOLO11-X', help='Object detector name')
+    parser.add_argument('--conf', type=float, default=0.5, help='Confidence threshold')
+    parser.add_argument('--limit', type=int, default=None, help='Max images')
+    parser.add_argument('--output', default=None, help='Output JSON path')
+    args = parser.parse_args()
+
+    images_dir = Path(args.images_dir) if args.images_dir else path_manager.get("bdd_images_val")
+    image_files = sorted(images_dir.glob("*.jpg"))
+    if args.limit:
+        image_files = image_files[:args.limit]
+
+    if not image_files:
+        logger.error(f"No images found in {images_dir}")
+        return
+
+    logger.info(f"Tracking {len(image_files)} images with {args.model}")
+
+    # Load detector
+    from Vision.src.detectors.detector_factory import get_object_detector
+    from Vision.config.models import OBJECT_DETECTORS
+
+    model_info = OBJECT_DETECTORS.get(args.model)
+    if not model_info:
+        logger.error(f"Unknown model: {args.model}")
+        return
+
+    model_path = path_manager.get_model(model_info["key"], check_exists=True)
+    detector = get_object_detector(model_info["type"], model_path=str(model_path), conf=args.conf)
+
+    tracker = ByteTracker2D(
+        high_thresh=args.conf * 0.8,
+        low_thresh=args.conf * 0.3,
+        match_thresh=0.3,
+        max_age=10,
+        min_hits=1,
+    )
+
+    all_results = {}
+    for img_path in image_files:
+        import cv2
+        img = cv2.imread(str(img_path))
+        if img is None:
+            continue
+
+        detections, _, stats = detector.detect(img, classes=None)
+
+        if detections:
+            dets_arr = np.array([d['bbox'] for d in detections])
+            scores_arr = np.array([d['confidence'] for d in detections])
+            class_names = sorted(set(d['class_name'] for d in detections))
+            name_to_idx = {n: i for i, n in enumerate(class_names)}
+            labels_arr = np.array([name_to_idx[d['class_name']] for d in detections])
+            idx_to_name = {i: n for n, i in name_to_idx.items()}
+
+            active = tracker.update(dets_arr, scores_arr, labels_arr)
+
+            tracked = []
+            for t in active:
+                state = t.get_state()
+                tracked.append({
+                    'bbox': state.tolist(),
+                    'class_name': idx_to_name.get(t.label, 'unknown'),
+                    'confidence': float(t.score),
+                    'track_id': t.track_id,
+                })
+        else:
+            tracker.update(
+                np.empty((0, 4)), np.empty(0), np.empty(0, dtype=int),
+            )
+            tracked = []
+
+        all_results[img_path.name] = tracked
+        logger.info(f"  {img_path.name}: {len(tracked)} tracked objects")
+
+    output_path = Path(args.output) if args.output else path_manager.get("predictions") / f"{args.model}_tracked.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, 'w') as f:
+        json.dump(all_results, f, indent=2)
+    logger.info(f"Tracking results saved to {output_path}")
+
+
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.warning("\n⚠️  Interrumpido por usuario")
-        sys.exit(1)
-    except Exception as e:
-        logger.exception(f"\n❌ Error fatal: {e}")
-        sys.exit(1)
+    # Check for --track flag
+    if '--track' in sys.argv:
+        sys.argv.remove('--track')
+        try:
+            run_tracking_batch()
+        except Exception as e:
+            logger.exception(f"\nError: {e}")
+            sys.exit(1)
+    else:
+        try:
+            main()
+        except KeyboardInterrupt:
+            logger.warning("\nInterrupted by user")
+            sys.exit(1)
+        except Exception as e:
+            logger.exception(f"\nFatal error: {e}")
+            sys.exit(1)

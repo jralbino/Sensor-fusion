@@ -80,7 +80,8 @@ def draw_boxes(ax, boxes, labels, scores=None, color_override=None,
 
 def render_bev(points, pred_boxes=None, pred_labels=None, pred_scores=None,
                gt_boxes=None, gt_labels=None, title='', pc_range=None,
-               point_size=0.3, fig_size=(12, 12), dpi=150):
+               point_size=0.3, fig_size=(12, 12), dpi=150,
+               pred_track_ids=None, track_histories=None):
     """Render a BEV image and return the matplotlib figure.
 
     Args:
@@ -89,9 +90,11 @@ def render_bev(points, pred_boxes=None, pred_labels=None, pred_scores=None,
         gt_boxes/labels: ground truth (numpy)
         title: plot title
         pc_range: [x_min, y_min, z_min, x_max, y_max, z_max]
+        pred_track_ids: (N,) integer track IDs for each prediction
+        track_histories: dict mapping track_id -> list of (x, y) positions
     """
     if pc_range is None:
-        pc_range = [0, -39.68, -3, 69.12, 39.68, 1]
+        pc_range = [-60, -60, -5, 60, 60, 3]
 
     fig, ax = plt.subplots(1, 1, figsize=fig_size, dpi=dpi)
     ax.set_facecolor('#1a1a1a')
@@ -116,10 +119,43 @@ def render_bev(points, pred_boxes=None, pred_labels=None, pred_scores=None,
         draw_boxes(ax, gt_boxes, gt_labels, color_override=(0.2, 1.0, 0.2),
                    linestyle='--', linewidth=1.2, alpha=0.8, show_labels=False)
 
-    # Draw predictions (solid, class-coloured)
+    # Draw predictions (solid, class-coloured or track-coloured)
     if pred_boxes is not None and len(pred_boxes) > 0:
-        draw_boxes(ax, pred_boxes, pred_labels, scores=pred_scores,
-                   linewidth=1.8, alpha=0.95, show_labels=True)
+        if pred_track_ids is not None:
+            # Track mode: colour by track ID, annotate with ID
+            TRACK_PALETTE = plt.cm.tab20(np.linspace(0, 1, 20))[:, :3]
+            for i, box in enumerate(pred_boxes):
+                tid = int(pred_track_ids[i])
+                color = TRACK_PALETTE[tid % 20]
+                corners = box_corners_bev(box)
+                polygon = plt.Polygon(corners, closed=True, fill=False,
+                                      edgecolor=color, linewidth=1.8, alpha=0.95)
+                ax.add_patch(polygon)
+                front_mid = (corners[0] + corners[1]) / 2
+                centre = np.array([box[0], box[1]])
+                ax.plot([centre[0], front_mid[0]], [centre[1], front_mid[1]],
+                        color=color, linewidth=1, alpha=0.95)
+                cls_idx = int(pred_labels[i]) if pred_labels is not None else 0
+                cls_name = CLASS_NAMES[cls_idx] if cls_idx < len(CLASS_NAMES) else f'c{cls_idx}'
+                txt = f'ID:{tid} {cls_name}'
+                if pred_scores is not None:
+                    txt += f' {pred_scores[i]:.2f}'
+                ax.text(box[0], box[1] + box[4] / 2 + 0.5, txt,
+                        fontsize=5, color=color, ha='center', va='bottom',
+                        alpha=0.95, clip_on=True)
+
+            # Draw trajectory lines
+            if track_histories:
+                for tid, hist in track_histories.items():
+                    if len(hist) < 2:
+                        continue
+                    color = TRACK_PALETTE[int(tid) % 20]
+                    pts_arr = np.array(hist)
+                    ax.plot(pts_arr[:, 0], pts_arr[:, 1], color=color,
+                            linewidth=1.0, alpha=0.6, linestyle='-')
+        else:
+            draw_boxes(ax, pred_boxes, pred_labels, scores=pred_scores,
+                       linewidth=1.8, alpha=0.95, show_labels=True)
 
     # Axis setup
     ax.set_xlim(pc_range[0], pc_range[3])

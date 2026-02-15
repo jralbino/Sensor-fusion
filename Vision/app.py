@@ -57,54 +57,35 @@ logger.info("Streamlit app started")
 # --- TITLE ---
 st.title("🚗 Sensor Fusion: Object & Lane Detection Comparison")
 
-# --- UTILITY FUNCTIONS ---
-def generate_color(class_name: str) -> tuple:
-    """Generate a unique color based on the hash of the class name."""
-    hash_val = hash(class_name)
-    r = (hash_val & 0xFF0000) >> 16
-    g = (hash_val & 0x00FF00) >> 8
-    b = hash_val & 0x0000FF
-    return (b, g, r)
-
-
-def get_optimal_font_color(bg_color_bgr: tuple) -> tuple:
-    """Calculate the optimal text color based on the background luminance."""
-    b, g, r = bg_color_bgr
-    luminance = (0.299 * r + 0.587 * g + 0.114 * b)
-    return (0, 0, 0) if luminance > 140 else (255, 255, 255)
-
-
-def draw_custom_boxes(img: np.ndarray, detections: List[Dict]) -> np.ndarray:
-    """Draw bounding boxes with labels on the image."""
-    canvas = img.copy()
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.6
-    font_thickness = 2
-    
-    for det in detections:
-        x1, y1, x2, y2 = map(int, det['bbox'])
-        name = det['class_name']
-        conf = det['confidence']
-        label = f"{name} {conf:.2f}"
-        box_color = generate_color(name)
-        text_color = get_optimal_font_color(box_color)
-        
-        # Draw rectangle
-        cv2.rectangle(canvas, (x1, y1), (x2, y2), box_color, 2)
-        
-        # Draw label with background
-        (w, h), baseline = cv2.getTextSize(label, font, font_scale, font_thickness)
-        top_pos = y1 - h - 10 if y1 - h - 10 > 0 else y1 + h + 5
-        text_pos_y = y1 - 5 if y1 - h - 10 > 0 else y1 + h + 5
-        
-        cv2.rectangle(canvas, (x1, top_pos), (x1 + w + 5, top_pos + h + 10), box_color, -1)
-        cv2.putText(canvas, label, (x1 + 2, text_pos_y), font, font_scale, text_color, font_thickness, cv2.LINE_AA)
-    
-    return canvas
+# --- UTILITY FUNCTIONS (imported from testable module) ---
+from Vision.src.app_utils import generate_color, get_optimal_font_color, draw_custom_boxes
 
 
 # --- MODEL CACHE ---
 from Vision.src.detectors.detector_factory import get_object_detector
+
+NUSCENES_CAMERAS = [
+    "CAM_FRONT", "CAM_FRONT_LEFT", "CAM_FRONT_RIGHT",
+    "CAM_BACK", "CAM_BACK_LEFT", "CAM_BACK_RIGHT",
+]
+
+
+@st.cache_resource
+def load_nuscenes(data_root: str, version: str):
+    """Load NuScenes dataset (cached)."""
+    from nuscenes.nuscenes import NuScenes
+    return NuScenes(version=version, dataroot=data_root, verbose=False)
+
+
+def iterate_scene_samples(nusc, start_idx: int, num_frames: int):
+    """Yield (frame_index, sample_token) for consecutive samples."""
+    sample = nusc.sample[start_idx]
+    for i in range(num_frames):
+        yield i, sample['token']
+        if not sample['next']:
+            break
+        sample = nusc.get('sample', sample['next'])
+
 
 @st.cache_resource
 def load_object_model(name: str) -> Optional[ObjectDetector]:
@@ -220,9 +201,54 @@ def run_app():
                 lane_viz_options['show_lines'] = True
             
             st.divider()
-            
+
+            # Tracking toggle
+            st.subheader("Tracking")
+            enable_tracking = st.checkbox("Enable ByteTrack", value=False, key='tracking_checkbox')
+
+            st.divider()
+
             # Image source selector
-            source_type = st.radio("Input Source", ["Sample Image", "Upload Image"], key='image_source_radio')
+            source_type = st.radio(
+                "Input Source",
+                ["Sample Image", "Upload Image", "NuScenes Sequence"],
+                key='image_source_radio',
+            )
+
+            # NuScenes options
+            nusc_data_root = None
+            nusc_version = None
+            nusc_camera = "CAM_FRONT"
+            nusc_sample_idx = 0
+            nusc_num_frames = 10
+            if source_type == "NuScenes Sequence":
+                _default_nusc = str(PROJECT_ROOT / "Fusion" / "data" / "sets" / "nuscenes")
+                nusc_data_root = st.text_input(
+                    "NuScenes data root",
+                    value=_default_nusc,
+                    key="nusc_data_root",
+                )
+                nusc_version = st.selectbox(
+                    "NuScenes version",
+                    ["v1.0-mini", "v1.0-trainval"],
+                    key="nusc_version",
+                )
+                nusc_camera = st.selectbox(
+                    "Camera", NUSCENES_CAMERAS, key="nusc_camera"
+                )
+                # Load NuScenes to know sample count
+                try:
+                    nusc = load_nuscenes(nusc_data_root, nusc_version)
+                    n_samples = len(nusc.sample)
+                    nusc_sample_idx = st.slider(
+                        "Sample index", 0, max(0, n_samples - 1), 0, key="nusc_sample_idx"
+                    )
+                    if enable_tracking:
+                        nusc_num_frames = st.slider(
+                            "Number of frames", 2, 40, 10, key="nusc_num_frames"
+                        )
+                except Exception as e:
+                    st.error(f"Failed to load NuScenes: {e}")
             
             # Logs in sidebar
             with st.expander("📋 System Logs", expanded=False):
@@ -317,24 +343,24 @@ def run_app():
         
         # Image selection/upload
         input_image = None
-        
+
         if source_type == "Sample Image":
             # Search for sample images
             img_dir = path_manager.get("bdd_images_val")
-            
+
             if img_dir.exists():
                 logger.info(f"Sample image directory exists: {img_dir}")
                 sample_files = sorted(list(img_dir.glob("*.jpg")))[:50]
                 logger.info(f"Found {len(sample_files)} sample .jpg files.")
-                
+
                 if sample_files:
                     selected_sample = st.selectbox(
-                        "Select Image", 
-                        sample_files, 
+                        "Select Image",
+                        sample_files,
                         format_func=lambda x: x.name,
                         key='sample_image_selector'
                     )
-                    
+
                     if selected_sample:
                         input_image = cv2.imread(str(selected_sample))
                         logger.info(f"Loaded sample image: {selected_sample.name}")
@@ -342,118 +368,278 @@ def run_app():
                     st.warning("No sample images found")
             else:
                 st.error(f"Sample directory not found: {img_dir}")
-        
-        else:  # Upload Image
+
+        elif source_type == "Upload Image":
             uploaded_file = st.file_uploader("Upload Image", type=['jpg', 'png', 'jpeg'])
-            
+
             if uploaded_file:
                 file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
                 input_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
                 logger.info(f"Uploaded image: {uploaded_file.name}")
-        
-        # Process image if available
+
+        elif source_type == "NuScenes Sequence":
+            # --- NUSCENES SEQUENCE ---
+            if nusc_data_root and nusc_version:
+                try:
+                    nusc = load_nuscenes(nusc_data_root, nusc_version)
+                except Exception:
+                    nusc = None
+
+                if nusc is not None:
+                    if enable_tracking and obj_detector:
+                        # Multi-frame tracking mode: process sequence and produce video
+                        _run_nuscenes_tracking(
+                            nusc, nusc_sample_idx, nusc_num_frames,
+                            nusc_camera, obj_detector, conf_thres,
+                            lane_detector, lane_viz_options,
+                            obj_model_type, lane_model_type,
+                        )
+                    else:
+                        # Single-frame mode: load selected sample image
+                        sample = nusc.sample[nusc_sample_idx]
+                        cam_data = nusc.get('sample_data', sample['data'][nusc_camera])
+                        img_path = Path(nusc_data_root) / cam_data['filename']
+                        if img_path.exists():
+                            input_image = cv2.imread(str(img_path))
+                            logger.info(f"Loaded NuScenes image: {img_path.name}")
+                        else:
+                            st.error(f"Image not found: {img_path}")
+
+        # Process single image (Sample / Upload / single NuScenes)
         if input_image is not None:
-            process_start = time.time()
-            
-            # --- OBJECT DETECTION ---
-            raw_detections = []
-            obj_latency = 0
-            
-            if obj_detector:
-                try:
-                    # Update confidence threshold (without reloading model)
-                    obj_detector.conf = conf_thres
-                    
-                    raw_detections, _, stats = obj_detector.detect(input_image, classes=None)
-                    obj_latency = stats['inference_time_ms']
-                    
-                    logger.info(f"Object detection: {len(raw_detections)} objects, {obj_latency:.1f}ms")
-                
-                except Exception as e:
-                    st.error(f"❌ Object detection failed: {e}")
-                    logger.exception("Object detection error")
-            
-            # --- CLASS FILTER ---
-            unique_classes_found = sorted(list(set(d['class_name'] for d in raw_detections)))
-            selected_classes_names = []
-            
-            with filter_container:
-                if unique_classes_found:
-                    st.divider()
-                    st.subheader("🎯 Active Detections")
-                    selected_classes_names = st.multiselect(
-                        f"Filter Visible Objects ({len(unique_classes_found)} types)",
-                        options=unique_classes_found,
-                        default=unique_classes_found
-                    )
-                else:
-                    if obj_model_type != "None":
-                        st.warning("No objects detected in this image")
-            
-            # Apply filter
-            final_detections = [d for d in raw_detections if d['class_name'] in selected_classes_names]
-            
-            # --- LANE DETECTION ---
-            processed_img = input_image.copy()
-            lane_latency = 0
-            
-            if lane_detector:
-                try:
-                    # Try with options (YOLOP)
-                    try:
-                        processed_img, lane_latency = lane_detector.detect(processed_img, **lane_viz_options)
-                    except TypeError:
-                        # Fallback without options (other detectors)
-                        processed_img, lane_latency = lane_detector.detect(processed_img)
-                    
-                    logger.info(f"Lane detection: {lane_latency:.1f}ms")
-                
-                except Exception as e:
-                    st.error(f"❌ Lane detection failed: {e}")
-                    logger.exception("Lane detection error")
-            
-            # --- DRAW BOUNDING BOXES ---
-            if final_detections:
-                processed_img = draw_custom_boxes(processed_img, final_detections)
-            
-            # --- SHOW RESULTS ---
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.subheader("🎬 Fusion Result")
-                st.image(
-                    cv2.cvtColor(processed_img, cv2.COLOR_BGR2RGB), 
-                    width="stretch",
-                    caption=f"Models: {obj_model_type} + {lane_model_type}"
-                )
-                
-                # Metrics
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Lane Latency", f"{lane_latency:.1f} ms")
-                m2.metric("Object Latency", f"{obj_latency:.1f} ms")
-                m3.metric("Objects Visible", len(final_detections))
-            
-            with col2:
-                st.subheader("📊 Summary")
-                
-                if final_detections:
-                    # Count objects by class
-                    counts = Counter([d['class_name'] for d in final_detections])
-                    
-                    for name, count in counts.most_common():
-                        st.success(f"**{name}**: {count}")
-                    
-                    # JSON details
-                    with st.expander("🔍 JSON Details"):
-                        st.json(final_detections)
-                else:
-                    st.info("No objects detected or filtered")
-            
-            total_time = (time.time() - process_start) * 1000
-            logger.info(f"Total processing time: {total_time:.1f}ms")
-        
-        else:
+            _process_single_image(
+                input_image, obj_detector, lane_detector,
+                conf_thres, enable_tracking,
+                lane_viz_options, filter_container,
+                obj_model_type, lane_model_type,
+            )
+        elif source_type != "NuScenes Sequence":
             st.info("👆 Please select or upload an image to start")
+
+
+def _process_single_image(
+    input_image, obj_detector, lane_detector,
+    conf_thres, enable_tracking,
+    lane_viz_options, filter_container,
+    obj_model_type, lane_model_type,
+):
+    """Process and display a single image with detection + optional tracking."""
+    process_start = time.time()
+
+    # --- OBJECT DETECTION ---
+    raw_detections = []
+    obj_latency = 0
+
+    if obj_detector:
+        try:
+            obj_detector.conf = conf_thres
+            raw_detections, _, stats = obj_detector.detect(input_image, classes=None)
+            obj_latency = stats['inference_time_ms']
+            logger.info(f"Object detection: {len(raw_detections)} objects, {obj_latency:.1f}ms")
+        except Exception as e:
+            st.error(f"Object detection failed: {e}")
+            logger.exception("Object detection error")
+
+    # --- TRACKING ---
+    if enable_tracking and raw_detections:
+        from tracking import ByteTracker2D
+        from Vision.src.app_utils import detections_to_tracker_format, tracker_output_to_detections
+
+        if 'vision_tracker' not in st.session_state:
+            st.session_state.vision_tracker = ByteTracker2D(
+                high_thresh=conf_thres * 0.8,
+                low_thresh=conf_thres * 0.3,
+                match_thresh=0.3,
+                max_age=10,
+                min_hits=1,
+            )
+        tracker = st.session_state.vision_tracker
+
+        fmt = detections_to_tracker_format(raw_detections)
+        if fmt is not None:
+            dets_arr, scores_arr, labels_arr, idx_to_name = fmt
+            active_tracks = tracker.update(dets_arr, scores_arr, labels_arr)
+            raw_detections = tracker_output_to_detections(active_tracks, idx_to_name)
+
+    # --- CLASS FILTER ---
+    unique_classes_found = sorted(list(set(d['class_name'] for d in raw_detections)))
+    selected_classes_names = []
+
+    with filter_container:
+        if unique_classes_found:
+            st.divider()
+            st.subheader("Active Detections")
+            selected_classes_names = st.multiselect(
+                f"Filter Visible Objects ({len(unique_classes_found)} types)",
+                options=unique_classes_found,
+                default=unique_classes_found
+            )
+        else:
+            if obj_model_type != "None":
+                st.warning("No objects detected in this image")
+
+    final_detections = [d for d in raw_detections if d['class_name'] in selected_classes_names]
+
+    # --- LANE DETECTION ---
+    processed_img = input_image.copy()
+    lane_latency = 0
+
+    if lane_detector:
+        try:
+            try:
+                processed_img, lane_latency = lane_detector.detect(processed_img, **lane_viz_options)
+            except TypeError:
+                processed_img, lane_latency = lane_detector.detect(processed_img)
+            logger.info(f"Lane detection: {lane_latency:.1f}ms")
+        except Exception as e:
+            st.error(f"Lane detection failed: {e}")
+            logger.exception("Lane detection error")
+
+    # --- DRAW BOUNDING BOXES ---
+    if final_detections:
+        processed_img = draw_custom_boxes(processed_img, final_detections)
+
+    # --- SHOW RESULTS ---
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        st.subheader("Fusion Result")
+        st.image(
+            cv2.cvtColor(processed_img, cv2.COLOR_BGR2RGB),
+            width="stretch",
+            caption=f"Models: {obj_model_type} + {lane_model_type}"
+        )
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Lane Latency", f"{lane_latency:.1f} ms")
+        m2.metric("Object Latency", f"{obj_latency:.1f} ms")
+        m3.metric("Objects Visible", len(final_detections))
+
+    with col2:
+        st.subheader("Summary")
+
+        if final_detections:
+            counts = Counter([d['class_name'] for d in final_detections])
+            for name, count in counts.most_common():
+                st.success(f"**{name}**: {count}")
+
+            with st.expander("JSON Details"):
+                st.json(final_detections)
+        else:
+            st.info("No objects detected or filtered")
+
+    total_time = (time.time() - process_start) * 1000
+    logger.info(f"Total processing time: {total_time:.1f}ms")
+
+
+def _run_nuscenes_tracking(
+    nusc, start_idx, num_frames, camera,
+    obj_detector, conf_thres,
+    lane_detector, lane_viz_options,
+    obj_model_type, lane_model_type,
+):
+    """Run multi-frame tracking on a NuScenes camera sequence and display video."""
+    import tempfile
+    import imageio.v3 as iio
+    from tracking import ByteTracker2D
+    from Vision.src.app_utils import detections_to_tracker_format, tracker_output_to_detections
+
+    st.subheader(f"NuScenes Tracking: {camera}")
+
+    tracker = ByteTracker2D(
+        high_thresh=conf_thres * 0.8,
+        low_thresh=conf_thres * 0.3,
+        match_thresh=0.2,
+        max_age=10,
+        min_hits=1,
+        distance_thresh=1.5,
+    )
+
+    obj_detector.conf = conf_thres
+    frames_rgb = []
+    all_track_ids = set()
+    progress = st.progress(0, text="Processing frames...")
+
+    for i, token in iterate_scene_samples(nusc, start_idx, num_frames):
+        sample = nusc.get('sample', token)
+        cam_data = nusc.get('sample_data', sample['data'][camera])
+        img_path = Path(nusc.dataroot) / cam_data['filename']
+
+        if not img_path.exists():
+            logger.warning(f"Missing image: {img_path}")
+            continue
+
+        frame = cv2.imread(str(img_path))
+
+        # Object detection
+        try:
+            raw_dets, _, _ = obj_detector.detect(frame, classes=None)
+        except Exception as e:
+            logger.warning(f"Detection failed on frame {i}: {e}")
+            raw_dets = []
+
+        # Tracking
+        fmt = detections_to_tracker_format(raw_dets)
+        if fmt is not None:
+            dets_arr, scores_arr, labels_arr, idx_to_name = fmt
+            active_tracks = tracker.update(dets_arr, scores_arr, labels_arr)
+            tracked_dets = tracker_output_to_detections(active_tracks, idx_to_name)
+            for d in tracked_dets:
+                all_track_ids.add(d['track_id'])
+        else:
+            tracked_dets = []
+            tracker.update(
+                np.empty((0, 4)), np.empty((0,)), np.empty((0,), dtype=int)
+            )
+
+        # Lane detection
+        canvas = frame.copy()
+        if lane_detector:
+            try:
+                try:
+                    canvas, _ = lane_detector.detect(canvas, **lane_viz_options)
+                except TypeError:
+                    canvas, _ = lane_detector.detect(canvas)
+            except Exception:
+                pass
+
+        # Draw tracked boxes
+        if tracked_dets:
+            canvas = draw_custom_boxes(canvas, tracked_dets)
+
+        frames_rgb.append(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB))
+        progress.progress((i + 1) / num_frames, text=f"Frame {i + 1}/{num_frames}")
+
+    progress.empty()
+
+    if not frames_rgb:
+        st.warning("No frames were processed.")
+        return
+
+    # Encode to MP4 video
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    iio.imwrite(
+        tmp_path,
+        frames_rgb,
+        fps=2,
+        codec="libx264",
+        plugin="pyav",
+    )
+
+    st.video(tmp_path)
+    st.caption(
+        f"{len(frames_rgb)} frames | {len(all_track_ids)} unique tracks | "
+        f"Models: {obj_model_type} + {lane_model_type}"
+    )
+
+    # Frame slider to inspect individual frames
+    if len(frames_rgb) > 1:
+        frame_idx = st.slider(
+            "Inspect frame", 0, len(frames_rgb) - 1, 0, key="nuscenes_frame_slider"
+        )
+        st.image(frames_rgb[frame_idx], caption=f"Frame {frame_idx}", width="stretch")
 
 
 # Call the app's main logic

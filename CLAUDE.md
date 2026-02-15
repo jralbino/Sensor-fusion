@@ -26,20 +26,22 @@ Lidar/venv/bin/python Lidar/evaluate.py --checkpoint <path> --data-root Fusion/d
 Lidar/venv/bin/python -m pytest Lidar/tests/
 ```
 
-### Vision Module
+### Vision Module (uses its own venv)
 ```bash
-# Install from project root
-pip install -e ".[vision]"
+# Setup
+cd Vision && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 
 # Streamlit apps
-streamlit run Vision/app.py
-streamlit run Vision/dashboard_app.py
+Vision/venv/bin/streamlit run Vision/app.py
+Vision/venv/bin/streamlit run Vision/dashboard_app.py
 
 # Batch processing
-python Vision/main.py
+Vision/venv/bin/python Vision/main.py
 
-# Tests
-pytest Vision/tests/
+# Tests (unit + integration)
+Vision/venv/bin/python -m pytest Vision/tests/
+Vision/venv/bin/python -m pytest Vision/tests/test_app.py -v          # 32 unit tests
+Vision/venv/bin/python -m pytest Vision/tests/test_integration.py -v  # 14 integration tests
 ```
 
 ### Fusion Module
