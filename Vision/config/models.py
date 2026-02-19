@@ -13,7 +13,8 @@ OBJECT_DETECTORS = {
 
 LANE_DETECTORS = {
     "YOLOP": "YOLOP (Panoptic)",
-    "UFLD": "UFLD",
+    "UFLD": "UFLD (TuSimple)",
+    "UFLD (CULane)": "UFLD (CULane)",
     "PolyLaneNet": "PolyLaneNet",
     "DeepLabv3": "DeepLabV3",
     "SegFormer": "SegFormer",

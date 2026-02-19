@@ -26,7 +26,8 @@ class LaneDetectorFactory:
             if "YOLOP" in name:
                 return YOLOPDetector()
             elif "UFLD" in name:
-                model_path = path_manager.get_model("ufld", check_exists=True)
+                model_key = "ufld_culane" if "CULane" in name else "ufld"
+                model_path = path_manager.get_model(model_key, check_exists=True)
                 return UFLDDetector(model_path=str(model_path))
             elif "PolyLaneNet" in name:
                 model_path = path_manager.get_model("polylanenet", check_exists=True)

@@ -163,7 +163,7 @@ def run_app():
         st.header("⚙️ Configuration")
         
         # OPERATION MODE
-        app_mode = st.radio("Mode", ["📷 Live Demo", "📊 View Benchmarks"], key='app_mode_radio')
+        app_mode = st.radio("Mode", ["📷 Live Demo", "📡 NuScenes", "📊 View Benchmarks"], key='app_mode_radio')
         st.divider()
 
         if app_mode == "📷 Live Demo":
@@ -254,13 +254,71 @@ def run_app():
             with st.expander("📋 System Logs", expanded=False):
                 if st.button("Refresh Logs", key='refresh_logs_button'):
                     st.rerun()
-                
+
                 logs = st_log_handler.get_logs(last_n=20)
                 if logs:
                     for log in reversed(logs):
                         st.text(f"{log['time'].strftime('%H:%M:%S')} | {log['level']} | {log['message']}")
                 else:
                     st.caption("No logs yet")
+
+        elif app_mode == "📡 NuScenes":
+            st.subheader("📦 Models")
+            nusc_obj_model = st.selectbox(
+                "Object Detector",
+                list(OBJECT_DETECTORS.keys()) + ["None"],
+                key='nusc_obj_detector_selector',
+            )
+            nusc_conf_thres = st.slider("Confidence", 0.1, 1.0, 0.5, 0.05, key='nusc_conf_slider')
+            st.divider()
+
+            nusc_lane_model = st.selectbox(
+                "Lane Detector",
+                list(LANE_DETECTORS.values()) + ["None"],
+                key='nusc_lane_detector_selector',
+            )
+            nusc_lane_viz = {}
+            if "YOLOP" in nusc_lane_model:
+                with st.expander("Lane Options", expanded=False):
+                    nusc_lane_viz['show_drivable'] = st.checkbox("Drivable Area", value=True, key='nusc_show_drivable')
+                    nusc_lane_viz['show_lanes'] = st.checkbox("Lane Mask", value=False, key='nusc_show_lanes')
+                    nusc_lane_viz['show_lane_points'] = st.checkbox("Vectors", value=True, key='nusc_show_lane_pts')
+            else:
+                nusc_lane_viz['show_lines'] = True
+            st.divider()
+
+            st.subheader("📂 Dataset")
+            _default_nusc = str(PROJECT_ROOT / "Fusion" / "data" / "sets" / "nuscenes")
+            nusc_data_root_n = st.text_input(
+                "NuScenes data root", value=_default_nusc, key="nusc_n_data_root"
+            )
+            nusc_version_n = st.selectbox(
+                "NuScenes version",
+                ["v1.0-mini", "v1.0-trainval"],
+                key="nusc_n_version",
+            )
+            nusc_camera_n = st.selectbox("Camera", NUSCENES_CAMERAS, key="nusc_n_camera")
+            nusc_show_all_cams = st.checkbox("Show all 6 cameras", value=False, key="nusc_n_all_cams")
+
+            # Load NuScenes to determine sample count
+            nusc_n_sample_idx = 0
+            nusc_n = None
+            try:
+                nusc_n = load_nuscenes(nusc_data_root_n, nusc_version_n)
+                n_samples_n = len(nusc_n.sample)
+                st.success(f"Loaded {n_samples_n} samples")
+                nusc_n_sample_idx = st.slider(
+                    "Sample index", 0, max(0, n_samples_n - 1), 0, key="nusc_n_sample_idx"
+                )
+            except Exception as e:
+                st.error(f"Failed to load NuScenes: {e}")
+            st.divider()
+
+            nusc_enable_tracking = st.checkbox("Enable ByteTrack", value=False, key='nusc_tracking_checkbox')
+            if nusc_enable_tracking:
+                nusc_num_frames_n = st.slider("Number of frames", 2, 40, 10, key="nusc_n_num_frames")
+            else:
+                nusc_num_frames_n = 1
 
 
     if app_mode == "📊 View Benchmarks":
@@ -331,7 +389,34 @@ def run_app():
             """
             )
 
-    else:
+    elif app_mode == "📡 NuScenes":
+        # ========================
+        # NUSCENES MODE
+        # ========================
+        if nusc_n is not None:
+            with st.spinner("Loading models..."):
+                nusc_obj_detector = load_object_model(nusc_obj_model)
+                nusc_lane_detector = load_lane_model(nusc_lane_model)
+
+            if nusc_enable_tracking and nusc_obj_detector:
+                _run_nuscenes_tracking(
+                    nusc_n, nusc_n_sample_idx, nusc_num_frames_n,
+                    nusc_camera_n, nusc_obj_detector, nusc_conf_thres,
+                    nusc_lane_detector, nusc_lane_viz,
+                    nusc_obj_model, nusc_lane_model,
+                )
+            else:
+                _run_nuscenes_vision_mode(
+                    nusc_n, nusc_n_sample_idx, nusc_camera_n,
+                    nusc_obj_detector, nusc_conf_thres,
+                    nusc_lane_detector, nusc_lane_viz,
+                    nusc_obj_model, nusc_lane_model,
+                    show_all_cameras=nusc_show_all_cams,
+                )
+        else:
+            st.info("Configure NuScenes dataset in the sidebar to start.")
+
+    elif app_mode == "📷 Live Demo":
         # ========================
         # LIVE DEMO MODE
         # ========================
@@ -530,6 +615,105 @@ def _process_single_image(
 
     total_time = (time.time() - process_start) * 1000
     logger.info(f"Total processing time: {total_time:.1f}ms")
+
+
+def _run_nuscenes_vision_mode(
+    nusc, sample_idx, camera,
+    obj_detector, conf_thres,
+    lane_detector, lane_viz_options,
+    obj_model_type, lane_model_type,
+    show_all_cameras=False,
+):
+    """Show NuScenes sample with object + lane detection on selected camera (and optionally all 6)."""
+    sample = nusc.sample[sample_idx]
+
+    def _process_camera(cam_name):
+        """Load + detect on a single camera image, return annotated BGR image."""
+        cam_data = nusc.get('sample_data', sample['data'][cam_name])
+        img_path = Path(nusc.dataroot) / cam_data['filename']
+        if not img_path.exists():
+            return None, 0, 0, []
+        frame = cv2.imread(str(img_path))
+        if frame is None:
+            return None, 0, 0, []
+
+        raw_dets = []
+        obj_lat = 0
+        if obj_detector:
+            obj_detector.conf = conf_thres
+            try:
+                raw_dets, _, stats = obj_detector.detect(frame, classes=None)
+                obj_lat = stats['inference_time_ms']
+            except Exception as e:
+                logger.warning(f"Detection failed on {cam_name}: {e}")
+
+        canvas = frame.copy()
+        lane_lat = 0
+        if lane_detector:
+            try:
+                try:
+                    canvas, lane_lat = lane_detector.detect(canvas, **lane_viz_options)
+                except TypeError:
+                    canvas, lane_lat = lane_detector.detect(canvas)
+            except Exception as e:
+                logger.warning(f"Lane detection failed on {cam_name}: {e}")
+
+        if raw_dets:
+            canvas = draw_custom_boxes(canvas, raw_dets)
+
+        return canvas, obj_lat, lane_lat, raw_dets
+
+    st.subheader(f"NuScenes — Sample {sample_idx}")
+
+    if show_all_cameras:
+        # Show all 6 cameras in a 2x3 grid (2 rows, 3 cols)
+        tab_selected, tab_all = st.tabs([f"Selected: {camera}", "All Cameras"])
+    else:
+        tab_selected = st.container()
+        tab_all = None
+
+    with tab_selected:
+        with st.spinner(f"Running detection on {camera}..."):
+            annotated, obj_lat, lane_lat, dets = _process_camera(camera)
+
+        if annotated is not None:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Objects", len(dets))
+            m2.metric("Object Latency", f"{obj_lat:.1f} ms")
+            m3.metric("Lane Latency", f"{lane_lat:.1f} ms")
+
+            st.image(
+                cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
+                caption=f"{camera} | Models: {obj_model_type} + {lane_model_type}",
+                width="stretch",
+            )
+
+            if dets:
+                with st.expander("Detection details"):
+                    from collections import Counter
+                    counts = Counter(d['class_name'] for d in dets)
+                    for cls, cnt in counts.most_common():
+                        st.write(f"**{cls}**: {cnt}")
+        else:
+            st.error(f"Could not load image for {camera}")
+
+    if tab_all is not None:
+        with tab_all:
+            st.write("Running detection on all 6 cameras...")
+            row1 = st.columns(3)
+            row2 = st.columns(3)
+            cols = row1 + row2
+            for col, cam_name in zip(cols, NUSCENES_CAMERAS):
+                with col:
+                    annotated_cam, _, _, dets_cam = _process_camera(cam_name)
+                    if annotated_cam is not None:
+                        col.image(
+                            cv2.cvtColor(annotated_cam, cv2.COLOR_BGR2RGB),
+                            caption=f"{cam_name} ({len(dets_cam)} objs)",
+                            use_container_width=True,
+                        )
+                    else:
+                        col.warning(f"{cam_name}: no image")
 
 
 def _run_nuscenes_tracking(

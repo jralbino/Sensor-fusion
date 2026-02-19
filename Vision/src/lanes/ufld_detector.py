@@ -203,7 +203,7 @@ class UFLDDetector:
                     
         return result, latency
 
-    def _process_output(self, output, w_orig, h_orig, crop_offset=0):
+    def _process_output(self, output, w_orig, h_orig, crop_offset=0, min_points=4):
         pred = output[0]
         prob = scipy.special.softmax(pred[:-1, :, :], axis=0)
         idx = np.arange(self.gridding_num) + 1
@@ -211,20 +211,43 @@ class UFLDDetector:
         loc = np.sum(prob * idx, axis=0)
         output_cls = np.argmax(pred, axis=0)
         loc[output_cls == self.gridding_num] = 0
-        
+
         lanes_points = []
         roi_h = h_orig - crop_offset
-        
+
         for lane_idx in range(4):
-            points = []
+            raw_points = []
             for row_idx in range(self.cls_num_per_lane):
                 val = loc[row_idx, lane_idx]
                 if val > 0:
                     x_net = (val * self.input_width) / (self.gridding_num - 1)
-                    x_real = int(x_net * w_orig / self.input_width)
+                    x_real = x_net * w_orig / self.input_width
                     y_net = self.row_anchor[row_idx]
-                    y_roi = int(y_net * roi_h / self.input_height)
+                    y_roi = y_net * roi_h / self.input_height
                     y_real = y_roi + crop_offset
-                    points.append((x_real, y_real))
-            lanes_points.append(points)
+                    raw_points.append((x_real, y_real))
+
+            # Discard lanes with too few detections
+            if len(raw_points) < min_points:
+                lanes_points.append([])
+                continue
+
+            # Polynomial smoothing: fit degree-2 poly to (y → x) mapping
+            ys = np.array([p[1] for p in raw_points])
+            xs = np.array([p[0] for p in raw_points])
+            try:
+                coeffs = np.polyfit(ys, xs, deg=min(2, len(raw_points) - 1))
+                y_min, y_max = ys.min(), ys.max()
+                y_plot = np.linspace(y_min, y_max, num=max(len(raw_points) * 2, 20))
+                x_plot = np.polyval(coeffs, y_plot)
+                # Keep only in-frame points
+                smooth = [
+                    (int(round(x)), int(round(y)))
+                    for x, y in zip(x_plot, y_plot)
+                    if 0 <= x < w_orig
+                ]
+                lanes_points.append(smooth if len(smooth) >= 2 else [])
+            except (np.linalg.LinAlgError, ValueError):
+                lanes_points.append([(int(round(p[0])), int(round(p[1]))) for p in raw_points])
+
         return lanes_points

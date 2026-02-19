@@ -1,6 +1,6 @@
 # Vision — 2D Object Detection, Lane Segmentation & Tracking
 
-Comparative analysis of SOTA object detectors (YOLO11, RT-DETR) and lane detection models (YOLOP, PolyLaneNet, UFLD) on BDD100K driving images, with optional ByteTrack multi-object tracking.
+Comparative analysis of SOTA object detectors (YOLO11, RT-DETR) and lane detection models (YOLOP, PolyLaneNet, UFLD) on BDD100K driving images, with optional ByteTrack multi-object tracking. Also supports NuScenes camera browsing with object and lane detection.
 
 ## How It Works
 
@@ -20,13 +20,16 @@ Each detector receives an image, runs inference, and returns a list of detection
 
 ### Lane Detection
 
-Uses a factory pattern (`src/lanes/lane_factory.py`) with three lane models:
+Uses a factory pattern (`src/lanes/lane_factory.py`) with four lane models:
 
-| Model | Output | Description |
-|-------|--------|-------------|
-| **YOLOP** | Drivable area mask + lane lines + vectorized points | Multi-task model (detection + segmentation) |
-| **PolyLaneNet** | Polynomial lane curves | Regresses lane polynomials |
-| **UFLD** | Lane point coordinates | Ultra-Fast Lane Detection |
+| Model | Output | Training Data | Description |
+|-------|--------|--------------|-------------|
+| **YOLOP** | Drivable area mask + lane lines | BDD100K | Multi-task panoptic model — best for BDD100K |
+| **UFLD (CULane)** | Smoothed lane point coordinates | CULane (urban) | Ultra-Fast Lane Detection, 18 row anchors, ~70 ms — recommended for diverse scenes |
+| **UFLD (TuSimple)** | Smoothed lane point coordinates | TuSimple (highway) | Same architecture, 56 row anchors, ~230 ms |
+| **PolyLaneNet** | Polynomial lane curves | TuSimple | Polynomial regression; weaker generalization outside highway scenes |
+
+`_process_output` improvements applied to UFLD: minimum-points filter (`min_points=4`) discards spurious partial lanes; degree-2 polynomial smoothing produces continuous curves instead of jagged segments.
 
 ### Tracking (ByteTrack 2D)
 
@@ -69,13 +72,24 @@ pip install -r requirements.txt
 Vision/venv/bin/streamlit run Vision/app.py
 ```
 
-Features:
+Three operating modes selectable from the sidebar:
+
+**Live Demo (BDD100K)**
 - Select object detector + lane detector from sidebar
 - Adjust confidence threshold
-- Enable ByteTrack tracking (checkbox) for persistent object IDs across image changes
-- Filter visible classes
-- View detection JSON details
-- Sample images from BDD100K or upload custom images
+- Enable ByteTrack tracking for persistent object IDs across image changes
+- Filter visible classes, view detection JSON details
+- Sample images from BDD100K validation set or upload custom images
+
+**NuScenes**
+- Browse NuScenes camera samples with a frame slider
+- Select any of the 6 NuScenes cameras (FRONT, FRONT_LEFT, FRONT_RIGHT, BACK, BACK_LEFT, BACK_RIGHT)
+- Apply the same object + lane detectors as in Live Demo
+- "Show all 6 cameras" checkbox renders a 2×3 camera grid
+- Per-frame metrics: detection count, inference latency
+
+**Benchmark Dashboard**
+- View stored benchmark results (mAP, precision, recall, latency) for all models
 
 ### 2. Batch Processing + Video Generation
 
@@ -128,14 +142,29 @@ Vision/venv/bin/streamlit run Vision/dashboard_app.py
 
 Displays benchmark charts, per-class performance, model comparisons, and generated videos.
 
+### 6. PolyLaneNet Diagnostic Tool
+
+```bash
+# Compare PolyLaneNet predictions against BDD100K Ground Truth
+Vision/venv/bin/python Vision/debug_polylanenet.py --idx 0
+
+# Options
+--idx N        Index of validation image (default: 0)
+--conf FLOAT   Confidence threshold (default: 0.3)
+--out PATH     Output comparison image path
+```
+
+Generates a side-by-side image (GT polylines left, PolyLaneNet predictions right) plus a per-lane console table showing confidence, vertical range, and filter reason.
+
 ## Project Structure
 
 ```
 Vision/
-├── app.py                  # Streamlit interactive app (detection + lanes + tracking)
+├── app.py                  # Streamlit app (Live Demo / NuScenes / Benchmarks)
 ├── main.py                 # Batch inference + tracking pipeline
 ├── dashboard_app.py        # Benchmark analysis dashboard
 ├── run_benchmark.py        # Performance benchmark runner
+├── debug_polylanenet.py    # GT vs PolyLaneNet comparison diagnostic
 ├── config/
 │   └── models.py           # Model registry (OBJECT_DETECTORS, LANE_DETECTORS)
 ├── src/
@@ -145,13 +174,16 @@ Vision/
 │   │   ├── yolo_detector.py       # YOLO11 wrapper
 │   │   └── rtdetr_detector.py     # RT-DETR wrapper
 │   ├── lanes/
-│   │   ├── lane_factory.py        # Factory: get_lane_detector()
-│   │   ├── yolop_detector.py      # YOLOP (multi-task)
-│   │   ├── polylanenet_detector.py # PolyLaneNet
-│   │   └── ufld_detector.py       # UFLD
+│   │   ├── lane_factory.py        # Factory: routes UFLD/PolyLaneNet/YOLOP
+│   │   ├── yolop_detector.py      # YOLOP (multi-task, BDD100K pretrained)
+│   │   ├── polylanenet_detector.py # PolyLaneNet (EfficientNet-B1, TuSimple)
+│   │   └── ufld_detector.py       # UFLD (TuSimple/CULane, poly smoothing)
 │   ├── predictor.py        # BatchPredictor (JSON output)
 │   └── visualizer.py       # ResultVisualizer (video generation)
 ├── models/                 # Model weights (.pt, .pth)
+│   ├── tusimple_18.pth     # UFLD TuSimple checkpoint
+│   ├── culane_18.pth       # UFLD CULane checkpoint
+│   └── model_2305.pt       # PolyLaneNet checkpoint (EfficientNet-B1)
 ├── data/raw/bdd100k/       # BDD100K dataset
 ├── venv/                   # Dedicated Python 3.11 venv
 ├── requirements.txt        # Pinned dependencies

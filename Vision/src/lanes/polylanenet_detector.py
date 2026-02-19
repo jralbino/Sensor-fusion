@@ -95,55 +95,57 @@ class PolyLaneNetDetector:
             raw_conf = lane_params[0]
             conf = 1 / (1 + np.exp(-raw_conf))
             
-            # Filtro de confianza (puedes bajarlo a 0.3 si detecta poco)
-            if conf < 0.5: continue 
+            # Filtro de confianza
+            if conf < 0.3:
+                continue
 
             # 2. Rango Vertical
-            # El modelo devuelve y_min/y_max normalizados
-            y_min_norm = lane_params[1] 
-            y_max_norm = lane_params[2] 
-            
-            # 3. Coeficientes
-            # IMPORTANTE: PolyLaneNet oficial usa [c0, c1, c2, c3] o [c3, c2, c1, c0]
-            # Basado en que la línea amarilla (REPO) funcionó, la lógica de esa prueba
-            # usaba x = c0 + ...
-            # Así que asumimos: [c3, c2, c1, c0] -> x = c3*y^3 + ... + c0
-            coeffs = lane_params[3:] 
-            c3, c2, c1, c0 = coeffs[0], coeffs[1], coeffs[2], coeffs[3]
+            # El modelo usa coordenadas estándar: 0=arriba(cielo), 1=abajo(coche)
+            # (confirmado del código oficial: ys = y_samples / img_h)
+            y_min_norm = lane_params[1]  # límite superior del carril
+            y_max_norm = lane_params[2]  # límite inferior del carril
 
-            # Convertir rangos a pixeles
-            y_start = int(y_min_norm * h_orig)
-            y_end = int(y_max_norm * h_orig)
-            
-            y_start = max(0, min(h_orig, y_start))
-            y_end = max(0, min(h_orig, y_end))
-            
-            if abs(y_end - y_start) < 20: continue
+            # Filtro de horizonte: TuSimple entrenó con y_min >= 160/720 ≈ 0.22
+            # Predicciones con y_min_norm < 0.20 son ruido del modelo (líneas fantasma
+            # que empiezan en el cielo y cruzan las líneas reales).
+            if y_min_norm < 0.20:
+                continue
 
-            # Generar puntos
-            # Importante: Iteramos de abajo (y_end) hacia arriba (y_start) o viceversa
+            # Conversión directa a píxeles (espacio estándar de imagen)
+            y_start = int(y_min_norm * h_orig)  # fila superior del carril
+            y_end   = int(y_max_norm * h_orig)  # fila inferior del carril
+
+            y_start = max(0, min(h_orig - 1, y_start))
+            y_end   = max(0, min(h_orig - 1, y_end))
+
+            if y_end <= y_start or (y_end - y_start) < 20:
+                continue
+
+            # 3. Coeficientes polinómicos: [c3, c2, c1, c0] (mayor grado primero)
+            # Evaluación oficial: np.polyval(lane[3:], y_norm) donde y_norm=y/h
+            # x_norm = c3*y^3 + c2*y^2 + c1*y + c0
+            coeffs = lane_params[3:]  # [c3, c2, c1, c0]
+
+            # Generar puntos usando normalización ESTÁNDAR (igual que el entrenamiento)
             plot_y = np.linspace(y_start, y_end, num=50)
             points = []
-            
+
             for y in plot_y:
-                # --- LA FÓRMULA GANADORA (AMARILLA/REPO) ---
-                # y_norm mide distancia desde el borde inferior
-                # y=h -> y_norm=0 (Coche)
-                # y=0 -> y_norm=1 (Cielo)
-                y_norm = (h_orig - y) / h_orig
-                
-                # Ecuación Polinómica
-                # x = c3*y^3 + c2*y^2 + c1*y + c0
-                x_norm = (c3 * (y_norm**3) + 
-                          c2 * (y_norm**2) + 
-                          c1 * y_norm + 
-                          c0)
-                
+                # Normalización estándar: 0=arriba(cielo), 1=abajo(coche)
+                # Igual que el código oficial: ys = y_pixel / img_h
+                y_norm = y / h_orig
+
+                # Evaluación polinómica (numpy polyval: coefs de mayor a menor grado)
+                x_norm = np.polyval(coeffs, y_norm)
                 x = int(x_norm * w_orig)
-                
-                # Validar que esté en pantalla
-                if -50 < x < w_orig + 50:
+
+                if 0 <= x < w_orig:  # Solo puntos dentro del ancho de la imagen
                     points.append((x, int(y)))
+
+            # Rechazar si menos del 30% de puntos están dentro de la imagen
+            # (evita líneas casi completamente fuera del frame)
+            if len(points) < max(3, int(0.30 * len(plot_y))):
+                continue
 
             if len(points) > 2:
                 for k in range(len(points) - 1):
