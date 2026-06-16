@@ -1,0 +1,105 @@
+# Sensor-Fusion multi-stack orchestration.
+# One service per dependency stack; the repo + datasets are bind-mounted so code
+# and data are shared and only the Python environment differs between containers.
+#
+# Quick start:
+#   docker compose build vision lidar          # build the light stacks
+#   docker compose build mmdet3d               # heavy (~15-30 min, compiles ops)
+#   docker compose run --rm vision  python Vision/main.py
+#   docker compose run --rm lidar   python Lidar/main.py
+#   docker compose run --rm mmdet3d python Lidar/tools/create_data.py ...
+#   docker compose run --rm --service-ports vision \
+#       streamlit run Vision/app.py --server.address 0.0.0.0
+#
+# GPU requires the NVIDIA Container Toolkit (already configured on this host).
+# See docker/README.md for the full command reference.
+
+services:
+  # --- 2D detection + lanes (YOLO26, RT-DETR, YOLOP/UFLD/...) ---
+  vision:
+    build:
+      context: .
+      dockerfile: docker/vision/Dockerfile
+    image: sensorfusion/vision:latest
+    gpus: all
+    working_dir: /workspace
+    environment:
+      - PYTHONPATH=/workspace:/workspace/Vision
+      - YOLO_CONFIG_DIR=/tmp/Ultralytics   # /root/.config is not writable in-container
+    volumes:
+      - ./:/workspace
+    ports:
+      - "8501:8501"   # Streamlit (Vision/app.py)
+    stdin_open: true
+    tty: true
+
+  # --- LiDAR clean-room detectors + Radar + Fusion projection ---
+  lidar:
+    build:
+      context: .
+      dockerfile: docker/lidar/Dockerfile
+    image: sensorfusion/lidar:latest
+    gpus: all
+    working_dir: /workspace
+    environment:
+      - PYTHONPATH=/workspace:/workspace/Lidar
+    volumes:
+      - ./:/workspace
+    ports:
+      - "8502:8502"   # Streamlit (Lidar/app.py) — run with --server.port 8502
+    stdin_open: true
+    tty: true
+
+  # --- Radar detection (CFAR+DBSCAN, RadarPillars, RadarCenterPoint) ---
+  radar:
+    build:
+      context: .
+      dockerfile: docker/radar/Dockerfile
+    image: sensorfusion/radar:latest
+    gpus: all
+    working_dir: /workspace
+    environment:
+      - PYTHONPATH=/workspace:/workspace/Radar
+    volumes:
+      - ./:/workspace
+    ports:
+      - "8503:8503"   # Streamlit (Radar app) — run with --server.port 8503
+    stdin_open: true
+    tty: true
+
+  # --- Decision-level (late) fusion: LiDAR 3D + camera 2D + radar in BEV + tracking ---
+  fusion:
+    build:
+      context: .
+      dockerfile: docker/fusion/Dockerfile
+    image: sensorfusion/fusion:latest
+    gpus: all
+    working_dir: /workspace
+    environment:
+      # Lidar/Vision/Radar each expose a top-level `src` pkg — keep only the root
+      # on PYTHONPATH; fusion code inserts each module path one at a time.
+      - PYTHONPATH=/workspace:/workspace/Fusion
+      - YOLO_CONFIG_DIR=/tmp/Ultralytics
+    volumes:
+      - ./:/workspace
+    shm_size: "8gb"
+    ports:
+      - "8504:8504"   # Streamlit (fusion app) — run with --server.port 8504
+    stdin_open: true
+    tty: true
+
+  # --- Official OpenMMLab 3D zoo: BEVFusion / CMT / CenterPoint / DSVT + data prep ---
+  mmdet3d:
+    build:
+      context: .
+      dockerfile: docker/mmdet3d/Dockerfile
+    image: sensorfusion/mmdet3d:latest
+    gpus: all
+    working_dir: /workspace
+    environment:
+      - PYTHONPATH=/workspace:/workspace/Lidar:/workspace/Fusion
+    volumes:
+      - ./:/workspace
+    shm_size: "8gb"   # mmdet3d dataloaders need shared memory
+    stdin_open: true
+    tty: true

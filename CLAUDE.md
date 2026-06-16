@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Multi-modal autonomous driving perception system with three modules: **Lidar** (3D detection), **Vision** (2D detection + lanes), and **Fusion** (LiDAR-to-camera projection). Uses NuScenes mini for 3D and BDD100K for 2D.
+Multi-modal autonomous driving perception system: **Lidar** (3D detection), **Vision** (2D detection + lanes), **Radar** (3D detection), and **Fusion** (LiDAR-to-camera projection + decision-level late fusion). Uses NuScenes mini for 3D and BDD100K for 2D.
+
+**Two ways to run:** per-module host venvs (`Lidar/venv`, `Vision/venv`, `Radar/venv`) for quick edits, or **Docker** (recommended — one GPU container per stack, reproducible). See `docker/README.md`. Note the host venvs have internally inconsistent pins (e.g. numpy vs nuscenes-devkit); the containers pin a consistent set.
 
 ## Key Commands
 
@@ -46,16 +48,34 @@ Vision/venv/bin/python -m pytest Vision/tests/test_integration.py -v  # 14 integ
 
 ### Fusion Module
 ```bash
+# LiDAR→camera projection
 python Fusion/src/lidar_to_camera.py
+
+# Late (decision-level) fusion — see Fusion/README.md
+docker compose run --rm fusion python -m pytest Fusion/tests/test_late_fusion.py -v
+docker compose run --rm fusion python Fusion/late_fusion_demo.py \
+    --sample-idx 0 --lidar-checkpoint Lidar/outputs/centerpoint_run/best.pth
 ```
+
+### Docker (recommended)
+```bash
+docker compose build vision lidar radar fusion   # light stacks (GPU)
+docker compose build mmdet3d                      # heavy: official BEVFusion/CMT/DSVT zoo
+docker compose run --rm vision python Vision/main.py
+docker compose run --rm --service-ports vision streamlit run Vision/app.py --server.address 0.0.0.0
+```
+One container per dependency stack; repo + datasets are bind-mounted. Full reference in `docker/README.md`.
 
 ## Architecture
 
-### Three-Module Structure
+### Module Structure
 - **Lidar/** — 3D object detection (PointPillars, SECOND w/ spconv, CenterPoint w/ heatmaps). 10 NuScenes classes.
-- **Vision/** — 2D detection (YOLO11, RT-DETR) and lane detection (YOLOP, PolyLaneNet, UFLD)
-- **Fusion/** — Projects LiDAR points onto camera images
+- **Vision/** — 2D detection (YOLO26, YOLO11, RT-DETR-X/L) and lane detection (YOLOP, PolyLaneNet, UFLD)
+- **Radar/** — 3D detection (CFAR+DBSCAN classical, RadarPillars, RadarCenterPoint)
+- **Fusion/** — LiDAR→camera projection + decision-level late fusion (`src/late_fusion/`)
+- **tracking/** — ByteTrack MOT (2D + 3D trackers) at the repo root
 - **config/** — Centralized path management via `PathManager` singleton loading `config/config.yaml`
+- **module_loader.py** — repo-root helper to import the conflicting per-module `src` packages one at a time (used by the fusion pipeline)
 
 ### Lidar Detection Pipeline
 1. **Voxelization**: Points → pillars (0.16m×0.16m×4.0m), grid 432×496×1, range [0, -39.68, -3] to [69.12, 39.68, 1]
@@ -67,7 +87,12 @@ python Fusion/src/lidar_to_camera.py
 
 ### Vision Detection Pipeline
 - Factory pattern: `Vision/src/detectors/detector_factory.py` and `Vision/src/lanes/lane_factory.py`
-- Models auto-download or load from `Vision/models/`
+- Models registered in `Vision/config/models.py` (`OBJECT_DETECTORS`) + `config/config.yaml`; weights in `Vision/models/`
+- Latest detectors: **YOLO26** (L/X) and **RT-DETR-X** (ultralytics 8.4.x)
+
+### Late Fusion Pipeline (`Fusion/src/late_fusion/`)
+- LiDAR-anchored decision-level fusion: LiDAR 3D boxes + camera 2D (projection-IoU association, class refinement) + radar (velocity / moving objects)
+- Pure-NumPy core (types/geometry/association/fusion + the A/B/C `multimodal` architectures) with 29 unit tests (`tests/test_late_fusion.py` + `tests/test_multimodal.py`); `pipeline.py` orchestrates the real detectors via `module_loader`
 
 ### Configuration
 All paths flow through `config/config.yaml` → `config/utils/path_manager.py` (PathManager singleton). Paths are relative to project root.

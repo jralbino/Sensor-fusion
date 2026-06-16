@@ -40,9 +40,12 @@ mdurl==0.1.2
 mpmath==1.3.0
 narwhals==2.16.0
 networkx==3.6.1
-numpy==2.4.2
+# numpy must stay <2: nuscenes-devkit 1.2.0 requires numpy<2.0. Pinning 2.4.2
+# created a silent conflict (only tolerated by a non-strict resolver).
+numpy==1.26.4
 nuscenes-devkit==1.2.0
-opencv-python==4.13.0.92
+# opencv-python 4.13 requires numpy>=2, conflicting with nuscenes-devkit (numpy<2).
+# Keep only the headless build (numpy<2 compatible; correct for servers/containers).
 opencv-python-headless==4.11.0.86
 packaging==26.0
 pandas==2.3.3

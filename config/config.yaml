@@ -43,7 +43,10 @@ dirs:
 models:
   yolo11l: yolo11l.pt
   yolo11x: yolo11x.pt
+  yolo26l: yolo26l.pt
+  yolo26x: yolo26x.pt
   rtdetr_l: rtdetr-l.pt
+  rtdetr_x: rtdetr-x.pt
   rtdetr_bdd: rtdetr-bdd-best.pt
   rtdetr_people: rtdetr-people-signs.pt
   yolop: yolop.pth

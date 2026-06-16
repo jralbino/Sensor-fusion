@@ -25,9 +25,19 @@ Lidar_old/
 
 # Root-level outputs (legacy)
 outputs/
+Fusion/outputs/
 
 runs/
 sensor_fusion.egg-info/
+
+# Large media / generated artifacts
+*.mp4
+*.avi
+debug_*.jpg
+debug_*.png
+
+# Local tooling config
+.claude/
 
 # IDE
 .vscode/

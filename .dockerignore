@@ -1,0 +1,26 @@
+# Keep build context small — these are mounted at runtime, not baked in
+**/venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.git
+.claude
+
+# Large data / weights (mounted as volumes)
+Fusion/data
+Vision/data
+Vision/models
+Vision/output
+Vision/runs
+Lidar/outputs
+Lidar/checkpoints
+Lidar/runs
+Radar/outputs
+*.pt
+*.pth
+*.onnx
+*.engine
+*.jpg
+*.png
+*.mp4
+*.html
