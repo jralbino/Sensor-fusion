@@ -6,6 +6,9 @@ frame size never changes):
     modality_camera_*  6-camera grid, 2D tracks (all 6 cameras)
     modality_lidar_*   BEV 3D tracks + projected on 6 cameras
     modality_radar_*   BEV 3D tracks (+velocity) + projected on 6 cameras
+
+The forward cameras also get a YOLOP lane / drivable-area overlay (disable with
+``--no-lanes``).
   Cross-modality fusion:
     fusionA_final_*    A: fuse the per-modality tracks (all modalities together)
     fusionB_single_*   B: one fusion stage, all raw sensors cooperating, then track
@@ -38,6 +41,7 @@ for p in (REPO_ROOT, os.path.join(REPO_ROOT, "Fusion")):
 from src.late_fusion.geometry import (  # noqa: E402
     BOX_EDGES, boxes_to_corners_3d, project_corners_to_image,
 )
+from src.late_fusion.lanes import overlay_lanes  # noqa: E402
 from src.late_fusion.multimodal import (  # noqa: E402
     confirm_filter, cov_central, fuse_then_track, track_then_fuse,
 )
@@ -91,7 +95,7 @@ def _bev_box(ax, box, color, lw=1.8, alpha=1.0, text=None):
         _txt(ax, box[0], box[1], text, color)
 
 
-def _cam_grid(fig, gs, cameras, objs, badge=False, col_start=1):
+def _cam_grid(fig, gs, cameras, objs, badge=False, col_start=1, lanes=None):
     for r, row in enumerate(CAMERA_GRID):
         for c, cn in enumerate(row):
             ax = fig.add_subplot(gs[r, c + col_start])
@@ -99,6 +103,8 @@ def _cam_grid(fig, gs, cameras, objs, badge=False, col_start=1):
             img = cv2.imread(str(cam["img_path"])) if cam else None
             if img is None:
                 ax.axis("off"); continue
+            if lanes and cn in lanes:
+                img = overlay_lanes(img, *lanes[cn])
             ax.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
             w, h = int(cam["img_w"]), int(cam["img_h"])
             for o in objs:
@@ -153,13 +159,14 @@ def render_3d(r, objs, suptitle, bev_title, out, velocity=False, badge=False,
                      color="#d62728", length_includes_head=True, clip_on=True)
     ax.set_xlim(-rng, rng); ax.set_ylim(-rng, rng); ax.set_aspect("equal")
     ax.set_xlabel("x fwd"); ax.set_ylabel("y left"); ax.set_title(bev_title, fontsize=10)
-    _cam_grid(fig, gs, sd["cameras"], objs, badge=badge)
+    _cam_grid(fig, gs, sd["cameras"], objs, badge=badge, lanes=sd.get("lanes"))
     fig.suptitle(suptitle, fontsize=13)
     fig.tight_layout(); fig.savefig(out, dpi=80); plt.close(fig)
 
 
 def render_camera(r, cam_objs, suptitle, out):
     cameras = r["sample_data"]["cameras"]
+    lanes = r["sample_data"].get("lanes")
     by_cam = {}
     for d in cam_objs:
         by_cam.setdefault(d.camera, []).append(d)
@@ -171,6 +178,8 @@ def render_camera(r, cam_objs, suptitle, out):
             img = cv2.imread(str(cam["img_path"])) if cam else None
             if img is None:
                 ax.axis("off"); continue
+            if lanes and cn in lanes:
+                img = overlay_lanes(img, *lanes[cn])
             for d in by_cam.get(cn, []):
                 x1, y1, x2, y2 = d.bbox.astype(int)
                 col = _CLASS_COLOR_BGR.get(d.label, (200, 200, 200))
@@ -214,6 +223,8 @@ def main():
     p.add_argument("--bev-range", type=float, default=60.0)
     p.add_argument("--fps", type=int, default=10)
     p.add_argument("--output-dir", default="Fusion/outputs/fusion")
+    p.add_argument("--no-lanes", action="store_true",
+                   help="disable the YOLOP lane / drivable-area camera overlay")
     args = p.parse_args()
     rng = args.bev_range
 
@@ -221,7 +232,8 @@ def main():
     print(f"Processing {len(indices)} frames...")
     results = run_fusion_batch(
         data_root=args.data_root, indices=indices, version=args.version,
-        lidar_model=args.lidar_model, lidar_checkpoint=args.lidar_checkpoint, device="cuda")
+        lidar_model=args.lidar_model, lidar_checkpoint=args.lidar_checkpoint,
+        use_lanes=not args.no_lanes, device="cuda")
 
     # --- Per-modality tracking (architecture A, stage 1) ---
     BaseTrack.reset_id_counter()

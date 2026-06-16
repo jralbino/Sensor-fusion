@@ -31,6 +31,7 @@ from .adapters import (
 )
 from .fusion import fuse
 from .geometry import nms_bev
+from .lanes import LaneEstimator
 from .types import Detection2D, Detection3D, FusedObject
 
 # module_loader lives at the repo root.
@@ -121,6 +122,8 @@ def run_fusion_batch(
     lidar_360: bool = True,
     device: str = "cuda",
     use_radar: bool = True,
+    use_lanes: bool = True,
+    lane_cameras: Sequence[str] = ("CAM_FRONT_LEFT", "CAM_FRONT", "CAM_FRONT_RIGHT"),
     verbose: bool = True,
 ) -> List[dict]:
     """Run camera + LiDAR + radar detection on several samples and fuse each.
@@ -146,6 +149,14 @@ def run_fusion_batch(
         cam_model_path = str(path_manager.get_model(camera_model_key, check_exists=True))
         yolo = get_object_detector("yolo", model_path=cam_model_path,
                                    conf=camera_conf, device=device)
+
+        # Camera-only lane / drivable-area layer (does not affect association).
+        lane_est = None
+        if use_lanes:
+            try:
+                lane_est = LaneEstimator.build()
+            except Exception as e:  # pragma: no cover - robustness
+                log(f"    lane estimator unavailable ({e}); continuing without lanes")
 
     # --- Phase 2: LiDAR model (once) + per-sample LiDAR + camera (Lidar context) ---
     log("[2/4] LiDAR detection + camera inference (Lidar)...")
@@ -186,6 +197,7 @@ def run_fusion_batch(
             lidar_dets = nms_bev(lidar_results_to_dets(results), iou_thresh=0.4)
 
             cam_dets: List[Detection2D] = []
+            lanes: dict = {}
             for cam_name, cam in sd["cameras"].items():
                 img = cv2.imread(str(cam["img_path"]))
                 if img is None:
@@ -195,10 +207,15 @@ def run_fusion_batch(
                     cam_dets.extend(yolo_dets_to_dets(parsed, cam_name))
                 except Exception as e:  # pragma: no cover - robustness
                     log(f"    sample {idx} camera {cam_name} failed: {e}")
+                if lane_est is not None and cam_name in lane_cameras:
+                    try:
+                        lanes[cam_name] = lane_est.masks(img)
+                    except Exception as e:  # pragma: no cover - robustness
+                        log(f"    sample {idx} lanes {cam_name} failed: {e}")
 
             per_sample[idx] = {
                 "token": token, "lidar_dets": lidar_dets, "cam_dets": cam_dets,
-                "cameras": sd["cameras"], "points": sd["points"],
+                "cameras": sd["cameras"], "points": sd["points"], "lanes": lanes,
                 "gt_boxes": sd["gt_boxes"], "gt_labels": sd["gt_labels"],
             }
 
@@ -242,7 +259,7 @@ def run_fusion_batch(
             "radar_dets": radar_dets,
             "sample_data": {"points": ps["points"], "cameras": ps["cameras"],
                             "token": ps["token"], "gt_boxes": ps["gt_boxes"],
-                            "gt_labels": ps["gt_labels"],
+                            "gt_labels": ps["gt_labels"], "lanes": ps["lanes"],
                             "lidar_to_global": _lidar_to_global(nusc, nusc.sample[idx])},
             "counts": {"lidar": len(ps["lidar_dets"]), "camera": len(ps["cam_dets"]),
                        "radar": len(radar_dets), "fused": len(fused)},

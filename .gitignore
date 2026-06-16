@@ -36,8 +36,10 @@ sensor_fusion.egg-info/
 debug_*.jpg
 debug_*.png
 
-# Local tooling config
+# Local tooling config (agent instruction files kept local, not in the portfolio repo)
 .claude/
+CLAUDE.md
+GEMINI.md
 
 # IDE
 .vscode/

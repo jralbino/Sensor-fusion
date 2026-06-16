@@ -27,10 +27,19 @@ class YOLOPDetector:
         ])
         self.img_size = 640
 
-    def detect(self, img_bgr, show_drivable=True, show_lanes=True, show_lane_points=True):
-        t_start = time.time()
+    def infer_masks(self, img_bgr):
+        """Run only the YOLOP segmentation heads and return the raw binary masks.
+
+        This is the detection logic behind :meth:`detect`, exposed without any
+        drawing so downstream code (e.g. the fusion camera overlay) can paint the
+        masks itself.
+
+        Returns:
+            (da_mask, ll_mask): two ``uint8`` HxW arrays at the input resolution
+            (1 = drivable-area / lane-line pixel, 0 = background).
+        """
         h_orig, w_orig, _ = img_bgr.shape
-        
+
         # 1. Preproceso
         img_resized = cv2.resize(img_bgr, (self.img_size, self.img_size))
         img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
@@ -40,16 +49,19 @@ class YOLOPDetector:
         with torch.no_grad():
             _, da_seg_out, ll_seg_out = self.model(input_tensor)
 
-        # 3. Post-proceso
-        # Interpolamos primero los logits al tamaño original
+        # 3. Post-proceso: interpolamos los logits al tamaño original y argmax
         da_seg_resized = F.interpolate(da_seg_out, size=(h_orig, w_orig), mode='bilinear', align_corners=True)
         ll_seg_resized = F.interpolate(ll_seg_out, size=(h_orig, w_orig), mode='bilinear', align_corners=True)
-        
-        # A) Área Conducible: Argmax estándar
         da_mask = torch.max(da_seg_resized, 1)[1].byte().squeeze().cpu().numpy()
-        
-        # B) Líneas de Carril: Argmax (Volvemos a la lógica original que funcionaba mejor geométricamente)
         ll_mask = torch.max(ll_seg_resized, 1)[1].byte().squeeze().cpu().numpy()
+        return da_mask, ll_mask
+
+    def detect(self, img_bgr, show_drivable=True, show_lanes=True, show_lane_points=True):
+        t_start = time.time()
+        h_orig, w_orig, _ = img_bgr.shape
+
+        # 1-3. Preproceso + inferencia + post-proceso (máscaras binarias)
+        da_mask, ll_mask = self.infer_masks(img_bgr)
 
         t_end = time.time()
         latency = (t_end - t_start) * 1000

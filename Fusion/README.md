@@ -49,6 +49,7 @@ src/late_fusion/
   association.py  # LiDAR<->camera (projection IoU), LiDAR<->radar (BEV dist), Hungarian
   fusion.py       # fuse(): LiDAR-anchored combination
   adapters.py     # raw detector outputs -> common types (+ radar->LiDAR transform)
+  lanes.py        # camera-only YOLOP lane / drivable-area overlay (not associated)
   pipeline.py     # end-to-end orchestration across the three module stacks
 ../late_fusion_demo.py        # CLI demo on one NuScenes sample (+ BEV PNG)
 ../tests/test_late_fusion.py  # 15 pure-CPU unit tests (the guaranteed small test)

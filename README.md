@@ -97,7 +97,7 @@ The official LiDAR detector is already strong, so the gains on a single class-ag
 | B fuse-then-track | 0.44 | **0.70** | 0.52 | **74** | 0.528 |
 | C cov-weighted central | 0.47 | 0.68 | **0.54** | 80 | 0.541 |
 
-A precision/recall trade-off, not a single winner: **A** maximises recall/micro-F1 (but noisiest), **B** maximises precision with the cleanest tracks, **C** is the best balance (top macro-F1) and a sensible default. *(Evaluating across many scenes flipped the single-scene impression that B won — exactly why the multi-scene protocol matters.)* 32 pure-NumPy unit tests cover the fusion core.
+A precision/recall trade-off, not a single winner: **A** maximises recall/micro-F1 (but noisiest), **B** maximises precision with the cleanest tracks, **C** is the best balance (top macro-F1) and a sensible default. *(Evaluating across many scenes flipped the single-scene impression that B won — exactly why the multi-scene protocol matters.)* 37 pure-NumPy unit tests cover the fusion core. The forward cameras also carry a YOLOP lane / drivable-area overlay (`fusion_video.py`, `--no-lanes` to disable).
 
 <p align="center">
   <img src="assets/fusion_abc.gif" width="95%" alt="Side-by-side BEV of the three fusion architectures A | B | C vs ground truth"><br>
@@ -106,10 +106,10 @@ A precision/recall trade-off, not a single winner: **A** maximises recall/micro-
 
 <p align="center">
   <img src="assets/fusionC.gif" width="95%" alt="Fusion C: BEV fused tracks + projection onto the 6 surround cameras"><br>
-  <em>Fusion C (covariance-weighted central): BEV with track IDs (left) and the fused 3D boxes projected onto all six surround cameras (right).</em>
+  <em>Fusion C (covariance-weighted central): BEV with track IDs (left) and the fused 3D boxes projected onto all six surround cameras (right), with a YOLOP lane / drivable-area overlay on the forward cameras.</em>
 </p>
 
-Full method write-up in **[Fusion.md](Fusion.md)**; module usage in [Fusion/README.md](Fusion/README.md).
+Full method write-up and module usage in **[Fusion/README.md](Fusion/README.md)**.
 
 ### Tracking — ByteTrack Multi-Object Tracking
 
@@ -260,8 +260,8 @@ Sensor-fusion/
 │   ├── fusion_video.py     # Per-modality + per-architecture videos
 │   ├── simulation_video.py # Data-driven scene reconstruction
 │   ├── fusion_evaluate.py  # Multi-scene evaluation + sensor ablation
-│   ├── tests/              # 32 fusion unit tests
-│   └── Fusion.md (root)    # Full method write-up + results
+│   ├── tests/              # 37 fusion unit tests
+│   └── README.md           # Full method write-up + results
 ├── tracking/               # ByteTrack MOT (shared by Lidar + Vision)
 │   ├── bytetrack.py        # Core two-threshold association + Hungarian matching
 │   ├── kalman_2d.py        # 2D Kalman filter (8-dim state)
@@ -273,7 +273,6 @@ Sensor-fusion/
 │   ├── config.yaml         # All paths + model filenames
 │   └── utils/path_manager.py  # PathManager singleton
 ├── docker/                 # Per-stack Dockerfiles + docker-compose.yml
-├── Fusion.md               # Late-fusion method write-up + results
 ├── LICENSE                 # MIT
 └── README.md
 ```

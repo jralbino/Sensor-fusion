@@ -30,9 +30,12 @@ RUN printf 'torch==2.10.0\ntorchvision==0.25.0\n' > /tmp/constraints.txt \
     && grep -vE '^(torch|torchvision)([=<> ]|$)' /tmp/lidar_req.txt > /tmp/lidar_req.docker.txt \
     && pip install --no-cache-dir -c /tmp/constraints.txt -r /tmp/lidar_req.docker.txt
 
-# Add the camera detector (ultralytics) + radar association + 3D viz extras.
+# Add the camera detector (ultralytics) + radar association + 3D viz extras +
+# the YOLOP lane detector's runtime deps (YOLOP is fetched via torch.hub at first
+# use; these are the third-party imports its model code needs).
 RUN pip install --no-cache-dir -c /tmp/constraints.txt \
-        ultralytics==8.4.14 scikit-learn pyquaternion plotly
+        ultralytics==8.4.14 scikit-learn pyquaternion plotly \
+        efficientnet_pytorch prefetch_generator yacs tqdm
 
 # Only the repo root (config + tracking/) on the path by default. Lidar/Vision/Radar
 # each expose a top-level `src` package, so they CANNOT all sit on PYTHONPATH at

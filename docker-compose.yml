@@ -82,6 +82,9 @@ services:
       - YOLO_CONFIG_DIR=/tmp/Ultralytics
     volumes:
       - ./:/workspace
+      # YOLOP lane detector is fetched via torch.hub; share the host cache so it
+      # loads offline (the container runs as root → /root/.cache/torch).
+      - ${HOME}/.cache/torch:/root/.cache/torch
     shm_size: "8gb"
     ports:
       - "8504:8504"   # Streamlit (fusion app) — run with --server.port 8504
