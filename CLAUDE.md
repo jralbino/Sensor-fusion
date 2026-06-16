@@ -51,10 +51,20 @@ Vision/venv/bin/python -m pytest Vision/tests/test_integration.py -v  # 14 integ
 # LiDAR→camera projection
 python Fusion/src/lidar_to_camera.py
 
-# Late (decision-level) fusion — see Fusion/README.md
-docker compose run --rm fusion python -m pytest Fusion/tests/test_late_fusion.py -v
+# Late (decision-level) fusion — see Fusion/README.md and Fusion.md
+docker compose run --rm fusion python -m pytest Fusion/tests/ -v          # 32 fusion tests
 docker compose run --rm fusion python Fusion/late_fusion_demo.py \
     --sample-idx 0 --lidar-checkpoint Lidar/outputs/centerpoint_run/best.pth
+
+# A/B/C comparison on one scene (metrics + 3-panel BEV video)
+docker compose run --rm fusion python Fusion/fusion_compare.py --start-idx 120 --num-frames 41
+# Multi-scene evaluation + sensor ablation (all 10 mini scenes; saves outputs/eval/*.txt)
+docker compose run --rm fusion python Fusion/fusion_evaluate.py
+# Per-modality + per-architecture videos / data-driven simulation
+docker compose run --rm fusion python Fusion/fusion_video.py --start-idx 120 --num-frames 41
+docker compose run --rm fusion python Fusion/simulation_video.py --start-idx 120 --num-frames 41
+# NOTE: Fusion/outputs is written as root by the container; fix with:
+#   docker compose run --rm -T fusion chown -R 1000:1000 Fusion/outputs
 ```
 
 ### Docker (recommended)
