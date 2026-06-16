@@ -7,6 +7,11 @@ Highlights:
 - **Per-modality + cross-modality tracking** with a dependency-free ByteTrack (2D + 3D) shared across modules.
 - **Reproducible**: one Docker container per dependency stack, or per-module Python 3.11 venvs.
 
+<p align="center">
+  <img src="assets/simulation.gif" width="70%" alt="Data-driven scene reconstruction: accumulated LiDAR map + ego + fused-tracked agents"><br>
+  <em>Data-driven scene reconstruction (digital twin): the static world is rebuilt by accumulating the LiDAR cloud in the global frame, with the ego vehicle and fused-tracked agents replayed through it.</em>
+</p>
+
 ## Modules
 
 ### LiDAR — 3D Object Detection & Tracking
@@ -83,6 +88,16 @@ Three fusion architectures are implemented and compared (`multimodal.py`):
 | C cov-weighted central | 0.51 | 0.84 | 0.63 | 118 | **12.2** | 233 |
 
 All three tie at **F1 = 0.63**; **B** gives the best precision / fewest false positives (fusing before tracking yields cleaner input), while **C** gives the best ID stability (longest tracks). 29 pure-NumPy unit tests cover the fusion core.
+
+<p align="center">
+  <img src="assets/fusion_abc.gif" width="95%" alt="Side-by-side BEV of the three fusion architectures A | B | C vs ground truth"><br>
+  <em>A | B | C side-by-side (BEV): gray = ground truth, coloured boxes = fused tracks (green = camera-confirmed, cyan = multi-sensor, orange = LiDAR-only, blue = radar-only).</em>
+</p>
+
+<p align="center">
+  <img src="assets/fusionC.gif" width="95%" alt="Fusion C: BEV fused tracks + projection onto the 6 surround cameras"><br>
+  <em>Fusion C (covariance-weighted central): BEV with track IDs (left) and the fused 3D boxes projected onto all six surround cameras (right).</em>
+</p>
 
 Full method write-up in **[Fusion.md](Fusion.md)**; module usage in [Fusion/README.md](Fusion/README.md).
 
