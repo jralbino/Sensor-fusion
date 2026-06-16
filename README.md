@@ -266,3 +266,13 @@ Sensor-fusion/
 ├── LICENSE                 # MIT
 └── README.md
 ```
+
+## Author
+
+**Jorge Rojas**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-jrojascontrol-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/in/jrojascontrol/)
+
+## License
+
+Released under the [MIT License](LICENSE).
