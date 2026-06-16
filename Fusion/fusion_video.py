@@ -124,7 +124,7 @@ def _cam_grid(fig, gs, cameras, objs, badge=False, col_start=1):
 
 
 def render_3d(r, objs, suptitle, bev_title, out, velocity=False, badge=False,
-              raw_lidar=None, raw_radar=None, rng=60.0):
+              raw_lidar=None, raw_radar=None, rng=60.0, bev_id_only=False):
     sd = r["sample_data"]
     fig = plt.figure(figsize=(22, 9))
     gs = fig.add_gridspec(2, 4)
@@ -141,7 +141,9 @@ def render_3d(r, objs, suptitle, bev_title, out, velocity=False, badge=False,
             ax.scatter(d.box[0], d.box[1], s=16, c="#9edae5", marker="x", clip_on=True)
     for o in objs:
         col = _color(o)
-        if badge:
+        if bev_id_only:                       # left BEV: only the tracking ID
+            t = f"#{o.track_id}"
+        elif badge:
             t = f"#{o.track_id} {o.label}\n{o.score:.2f} [{_badge(o)}]"
         else:
             t = f"#{o.track_id} {o.label}\n{o.score:.2f}"
@@ -259,16 +261,19 @@ def main():
     print("Rendering cross-modality fusion videos...")
     _video(results, lambda i, r, o: render_3d(
         r, A[i], f"Fusion A (per-modality tracks → fused) — frame {r['index']}",
-        f"A fused tracks ({len(A[i])})", o, velocity=True, badge=True, rng=rng),
+        f"A fused tracks ({len(A[i])})", o, velocity=True, badge=True, rng=rng,
+        bev_id_only=True),
         os.path.join(args.output_dir, f"fusionA_final_{tag}.mp4"), args.fps)
     _video(results, lambda i, r, o: render_3d(
         r, B[i], f"Fusion B (single stage, all sensors → tracked) — frame {r['index']}",
         f"B fused tracks ({len(B[i])})", o, velocity=True, badge=True,
-        raw_lidar=results[i]["lidar_dets"], raw_radar=results[i]["radar_dets"], rng=rng),
+        raw_lidar=results[i]["lidar_dets"], raw_radar=results[i]["radar_dets"], rng=rng,
+        bev_id_only=True),
         os.path.join(args.output_dir, f"fusionB_single_{tag}.mp4"), args.fps)
     _video(results, lambda i, r, o: render_3d(
         r, C[i], f"Fusion C (covariance-weighted central, researched best) — frame {r['index']}",
-        f"C fused tracks ({len(C[i])})", o, velocity=True, badge=True, rng=rng),
+        f"C fused tracks ({len(C[i])})", o, velocity=True, badge=True, rng=rng,
+        bev_id_only=True),
         os.path.join(args.output_dir, f"fusionC_covcentral_{tag}.mp4"), args.fps)
     print("Done.")
 
