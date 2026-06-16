@@ -16,6 +16,40 @@ Highlights:
   <em>Data-driven scene reconstruction (digital twin): the static world is rebuilt by accumulating the LiDAR cloud in the global frame, with the ego vehicle and fused-tracked agents replayed through it.</em>
 </p>
 
+## Architecture
+
+Each modality runs its own detector; the **decision-level late fusion** combines their *outputs* in the bird's-eye-view frame (LiDAR-anchored), and a shared ByteTrack stage gives stable IDs. Lanes are a camera-only overlay and do not take part in association.
+
+```mermaid
+flowchart TD
+    NU["NuScenes mini<br/>LiDAR · 6 cameras · radar"]
+    BDD["BDD100K<br/>2D images — Vision training"]
+
+    subgraph DET["Per-modality detection"]
+        direction LR
+        L["LiDAR 3D<br/>PointPillars · SECOND · CenterPoint<br/>3D boxes · 10 classes"]
+        V["Vision 2D<br/>YOLO26 · RT-DETR<br/>+ lanes: YOLOP · UFLD"]
+        R["Radar 3D<br/>CFAR+DBSCAN · RadarPillars<br/>boxes + velocity"]
+    end
+
+    NU --> L & V & R
+    BDD -.->|train| V
+
+    subgraph FUSE["Decision-level late fusion — LiDAR-anchored"]
+        direction LR
+        ASSOC["Association<br/>LiDAR↔camera projection-IoU<br/>LiDAR↔radar BEV distance"]
+        ARCH["3 architectures<br/>A track-then-fuse<br/>B fuse-then-track<br/>C cov-weighted central"]
+        ASSOC --> ARCH
+    end
+
+    L & V & R --> ASSOC
+    BT["ByteTrack 2D + 3D<br/>shared · dependency-free"] <--> ARCH
+
+    ARCH --> VID["BEV + 6-camera videos<br/>+ camera lane overlay"]
+    ARCH --> MET["Metrics<br/>multi-scene eval + sensor ablation"]
+    V -.->|lane masks| VID
+```
+
 ## Modules
 
 ### LiDAR — 3D Object Detection & Tracking
@@ -219,7 +253,7 @@ docker compose run --rm fusion python Fusion/fusion_video.py --start-idx 120 --n
 # Data-driven scene reconstruction / simulation
 docker compose run --rm fusion python Fusion/simulation_video.py --start-idx 120 --num-frames 41
 
-# Fusion unit tests (29, pure NumPy)
+# Fusion unit tests (37, pure NumPy)
 docker compose run --rm fusion python -m pytest Fusion/tests/ -v
 
 # --- Tests ---
