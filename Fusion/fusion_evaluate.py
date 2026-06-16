@@ -29,10 +29,11 @@ for p in (REPO_ROOT, os.path.join(REPO_ROOT, "Fusion")):
         sys.path.insert(0, p)
 
 from src.late_fusion.multimodal import (  # noqa: E402
-    confirm_filter, cov_central, evaluate, fuse_then_track, fuse_then_track_ablation,
-    track_then_fuse,
+    DISTANCE_BINS, confirm_filter, cov_central, evaluate, fuse_then_track,
+    fuse_then_track_ablation, per_class_counts, per_distance_counts, track_then_fuse,
 )
 from src.late_fusion.pipeline import run_fusion_batch  # noqa: E402
+from src.late_fusion.types import NUSCENES_CLASSES  # noqa: E402
 
 DEFAULT_CKPT = "Lidar/models/hv_pointpillars_secfpn_sbn-all_4x8_2x_nus-3d_20210826_225857-f19d00a3.pth"
 
@@ -103,7 +104,8 @@ def main():
     # --- Detection once over every selected scene (the expensive GPU pass) ---
     results = run_fusion_batch(
         data_root=args.data_root, indices=all_idx, version=args.version,
-        lidar_model=args.lidar_model, lidar_checkpoint=args.lidar_checkpoint, device="cuda")
+        lidar_model=args.lidar_model, lidar_checkpoint=args.lidar_checkpoint,
+        use_lanes=False, device="cuda")   # lanes don't affect scoring; skip YOLOP
     by_index = {r["index"]: r for r in results}
     for r in results:                       # free point clouds; not needed for scoring
         r["sample_data"].pop("points", None)
@@ -122,13 +124,25 @@ def main():
 
     abl_metrics = {name: [] for name, _ in ablation}
     arch_metrics = {name: [] for name, _ in archs}
+    # Per-class + per-distance counts pooled (summed) across scenes, per architecture.
+    pc_pool = {n: {c: {"TP": 0, "FP": 0, "FN": 0} for c in NUSCENES_CLASSES} for n, _ in archs}
+    pd_pool = {n: {lab: {"TP_gt": 0, "FN": 0, "TP_pred": 0, "FP": 0}
+                   for _, _, lab in DISTANCE_BINS} for n, _ in archs}
     for name, idxs in scenes:
         rs = [by_index[i] for i in idxs]
         gt = [r["sample_data"]["gt_boxes"] for r in rs]
+        gt_labels = [r["sample_data"]["gt_labels"] for r in rs]
         for cname, fn in ablation:
             abl_metrics[cname].append(evaluate(confirm_filter(fn(rs), args.confirm), gt))
         for cname, fn in archs:
-            arch_metrics[cname].append(evaluate(confirm_filter(fn(rs), args.confirm), gt))
+            pf = confirm_filter(fn(rs), args.confirm)
+            arch_metrics[cname].append(evaluate(pf, gt))
+            for c, cnt in per_class_counts(pf, gt, gt_labels).items():
+                for k in ("TP", "FP", "FN"):
+                    pc_pool[cname][c][k] += cnt[k]
+            for lab, cnt in per_distance_counts(pf, gt).items():
+                for k in cnt:
+                    pd_pool[cname][lab][k] += cnt[k]
         gt_avg = np.mean([len(g) for g in gt])
         print(f"  scene {name:<18} ({len(idxs):>2} frames, GT~{gt_avg:.0f}/frame) done")
 
@@ -167,6 +181,44 @@ def main():
             f"{_ms(a['mean_track_len']):>11} {a['_micro']['f1']:>8.3f}")
     best = max(archs, key=lambda na: arch_agg[na[0]]["_micro"]["f1"])
     out(f"\nBest architecture by pooled micro-F1: {best[0]}")
+
+    def prf(tp, fp, fn):
+        r = tp / (tp + fn) if (tp + fn) else 0.0
+        p = tp / (tp + fp) if (tp + fp) else 0.0
+        f = 2 * r * p / (r + p) if (r + p) else 0.0
+        return r, p, f
+
+    out()
+    out(f"=== Per-class detection (pooled over {len(scenes)} scene(s), "
+        "class-aware 2 m match) ===")
+    for name, _ in archs:
+        out(f"\n[{name}]")
+        out(f"  {'class':<22} {'support':>7} {'recall':>8} {'prec':>8} {'f1':>8}")
+        f1s = []
+        for c in NUSCENES_CLASSES:
+            tp, fp, fn = (pc_pool[name][c][k] for k in ("TP", "FP", "FN"))
+            if (tp + fn) == 0 and (tp + fp) == 0:
+                continue                       # class absent from GT and predictions
+            r, p, f = prf(tp, fp, fn)
+            if (tp + fn) > 0:
+                f1s.append(f)
+            out(f"  {c:<22} {tp + fn:>7} {r:>8.3f} {p:>8.3f} {f:>8.3f}")
+        macro = float(np.mean(f1s)) if f1s else 0.0
+        out(f"  -> macro-F1 over {len(f1s)} classes with GT: {macro:.3f}")
+
+    out()
+    out("=== Per-distance detection (pooled, class-agnostic 2 m match) ===")
+    for name, _ in archs:
+        out(f"\n[{name}]")
+        out(f"  {'range':<10} {'GT':>6} {'recall':>8} {'prec':>8} {'f1':>8}")
+        for _, _, lab in DISTANCE_BINS:
+            d = pd_pool[name][lab]
+            n_gt = d["TP_gt"] + d["FN"]
+            recall = d["TP_gt"] / n_gt if n_gt else 0.0
+            n_pred = d["TP_pred"] + d["FP"]
+            prec = d["TP_pred"] / n_pred if n_pred else 0.0
+            f1 = 2 * recall * prec / (recall + prec) if (recall + prec) else 0.0
+            out(f"  {lab:<10} {n_gt:>6} {recall:>8.3f} {prec:>8.3f} {f1:>8.3f}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     out_path = os.path.join(args.output_dir, f"ablation_multiscene_{len(scenes)}scenes.txt")

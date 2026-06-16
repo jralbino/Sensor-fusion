@@ -135,7 +135,9 @@ The official LiDAR detector is already strong, so the gains on a single class-ag
 | B fuse-then-track | 0.44 | **0.70** | 0.52 | **74** | 0.528 |
 | C cov-weighted central | 0.47 | 0.68 | **0.54** | 80 | 0.541 |
 
-A precision/recall trade-off, not a single winner: **A** maximises recall/micro-F1 (but noisiest), **B** maximises precision with the cleanest tracks, **C** is the best balance (top macro-F1) and a sensible default. *(Evaluating across many scenes flipped the single-scene impression that B won — exactly why the multi-scene protocol matters.)* 37 pure-NumPy unit tests cover the fusion core. The forward cameras also carry a YOLOP lane / drivable-area overlay (`fusion_video.py`, `--no-lanes` to disable).
+A precision/recall trade-off, not a single winner: **A** maximises recall/micro-F1 (but noisiest), **B** maximises precision with the cleanest tracks, **C** is the best balance (top macro-F1) and a sensible default. *(Evaluating across many scenes flipped the single-scene impression that B won — exactly why the multi-scene protocol matters.)*
+
+`fusion_evaluate.py` also breaks each architecture down **per class** (class-aware matching, so a mis-classified box is penalised) and **per distance band** (0–20 m / 20–35 m / 35 m+) — surfacing where detection actually degrades, which the aggregate F1 hides. 40 pure-NumPy unit tests cover the fusion core. The forward cameras also carry a YOLOP lane / drivable-area overlay (`fusion_video.py`, `--no-lanes` to disable).
 
 <p align="center">
   <img src="assets/fusion_abc.gif" width="95%" alt="Side-by-side BEV of the three fusion architectures A | B | C vs ground truth"><br>
@@ -253,7 +255,7 @@ docker compose run --rm fusion python Fusion/fusion_video.py --start-idx 120 --n
 # Data-driven scene reconstruction / simulation
 docker compose run --rm fusion python Fusion/simulation_video.py --start-idx 120 --num-frames 41
 
-# Fusion unit tests (37, pure NumPy)
+# Fusion unit tests (40, pure NumPy)
 docker compose run --rm fusion python -m pytest Fusion/tests/ -v
 
 # --- Tests ---
@@ -298,7 +300,7 @@ Sensor-fusion/
 │   ├── fusion_video.py     # Per-modality + per-architecture videos
 │   ├── simulation_video.py # Data-driven scene reconstruction
 │   ├── fusion_evaluate.py  # Multi-scene evaluation + sensor ablation
-│   ├── tests/              # 37 fusion unit tests
+│   ├── tests/              # 40 fusion unit tests
 │   └── README.md           # Full method write-up + results
 ├── tracking/               # ByteTrack MOT (shared by Lidar + Vision)
 │   ├── bytetrack.py        # Core two-threshold association + Hungarian matching

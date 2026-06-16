@@ -25,7 +25,7 @@ from .geometry import transform_box
 from .tracking_helpers import (
     attach_velocity, make_camera_trackers, make_tracker, name_to_idx, track_2d, track_3d,
 )
-from .types import Detection2D, Detection3D, FusedObject
+from .types import NUSCENES_CLASSES, Detection2D, Detection3D, FusedObject
 from tracking.bytetrack import BaseTrack
 
 
@@ -206,6 +206,44 @@ def confirm_filter(per_frame: List[List[FusedObject]], min_frames: int) -> List[
     return [[o for o in objs if o.track_id in keep] for objs in per_frame]
 
 
+def _as_boxes(gt) -> np.ndarray:
+    """Coerce a GT entry to an (N, 7) float array (empty -> (0, 7))."""
+    return np.asarray(gt).reshape(-1, 7) if len(gt) else np.zeros((0, 7))
+
+
+def _match_frame(objs: Sequence[FusedObject], gt: np.ndarray,
+                 dist_thresh: float = 2.0):
+    """Greedy nearest-neighbour BEV matching (class-agnostic) of predicted objects
+    to GT boxes within ``dist_thresh``.
+
+    Returns ``(matched_obj_idx, matched_gt_idx)`` as index sets — a prediction and
+    a GT box are paired at most once, in ascending distance order.
+    """
+    pairs = []
+    for i, o in enumerate(objs):
+        for g in range(len(gt)):
+            d = float(np.linalg.norm(o.box[:2] - gt[g, :2]))
+            if d < dist_thresh:
+                pairs.append((d, i, g))
+    pairs.sort()
+    mo, mg = set(), set()
+    for _, i, g in pairs:
+        if i in mo or g in mg:
+            continue
+        mo.add(i)
+        mg.add(g)
+    return mo, mg
+
+
+def _prf(tp: int, fp: int, fn: int) -> dict:
+    """Recall / precision / F1 from raw counts."""
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    f1 = 2 * recall * precision / (recall + precision) if (recall + precision) else 0.0
+    return {"TP": tp, "FP": fp, "FN": fn,
+            "recall": recall, "precision": precision, "f1": f1}
+
+
 def evaluate(per_frame: List[List[FusedObject]],
              gt_per_frame: Sequence[np.ndarray],
              dist_thresh: float = 2.0) -> dict:
@@ -215,30 +253,95 @@ def evaluate(per_frame: List[List[FusedObject]],
     for objs, gt in zip(per_frame, gt_per_frame):
         for o in objs:
             life[o.track_id] = life.get(o.track_id, 0) + 1
-        gt = np.asarray(gt).reshape(-1, 7) if len(gt) else np.zeros((0, 7))
-        pairs = []
-        for i, o in enumerate(objs):
-            for g in range(len(gt)):
-                d = float(np.linalg.norm(o.box[:2] - gt[g, :2]))
-                if d < dist_thresh:
-                    pairs.append((d, i, g))
-        pairs.sort()
-        mo, mg = set(), set()
-        for d, i, g in pairs:
-            if i in mo or g in mg:
-                continue
-            mo.add(i)
-            mg.add(g)
+        gt = _as_boxes(gt)
+        mo, mg = _match_frame(objs, gt, dist_thresh)
         tp += len(mg)
         fn += len(gt) - len(mg)
         fp += len(objs) - len(mo)
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    f1 = 2 * recall * precision / (recall + precision) if (recall + precision) else 0.0
     lengths = list(life.values())
     return {
-        "TP": tp, "FP": fp, "FN": fn,
-        "recall": recall, "precision": precision, "f1": f1,
+        **_prf(tp, fp, fn),
         "num_tracks": len(life),
         "mean_track_len": float(np.mean(lengths)) if lengths else 0.0,
     }
+
+
+def _gt_class_name(label, class_names: Sequence[str]):
+    """Map a GT label (int index into ``class_names``, or a name) to a class name,
+    or ``None`` if it cannot be resolved."""
+    try:
+        i = int(label)
+        return class_names[i] if 0 <= i < len(class_names) else None
+    except (ValueError, TypeError):
+        s = str(label)
+        return s if s in class_names else None
+
+
+def per_class_counts(per_frame: List[List[FusedObject]],
+                     gt_per_frame: Sequence[np.ndarray],
+                     gt_labels_per_frame: Sequence[np.ndarray],
+                     class_names: Sequence[str] = NUSCENES_CLASSES,
+                     dist_thresh: float = 2.0) -> Dict[str, dict]:
+    """Class-aware TP/FP/FN per class (greedy BEV matching *within* each class).
+
+    A prediction is only allowed to match a GT box of the **same** class, so a
+    mis-classified-but-well-localised box is both a FP (predicted class) and a FN
+    (GT class) — this scores classification, not just localisation.
+
+    Returns ``{class_name: {"TP","FP","FN"}}`` for every class in ``class_names``.
+    """
+    counts = {c: {"TP": 0, "FP": 0, "FN": 0} for c in class_names}
+    for objs, gt, labels in zip(per_frame, gt_per_frame, gt_labels_per_frame):
+        gt = _as_boxes(gt)
+        labels = np.asarray(labels).reshape(-1)
+        gt_names = [_gt_class_name(labels[g], class_names) if g < len(labels) else None
+                    for g in range(len(gt))]
+        for c in class_names:
+            gt_c = gt[[g for g in range(len(gt)) if gt_names[g] == c]] if len(gt) \
+                else np.zeros((0, 7))
+            objs_c = [o for o in objs if o.label == c]
+            mo, mg = _match_frame(objs_c, gt_c, dist_thresh)
+            counts[c]["TP"] += len(mg)
+            counts[c]["FN"] += len(gt_c) - len(mg)
+            counts[c]["FP"] += len(objs_c) - len(mo)
+    return counts
+
+
+# Near / mid / far BEV-range bands (metres from the ego), the autonomous-driving
+# concern that an aggregate number hides.
+DISTANCE_BINS = [(0.0, 20.0, "0-20m"), (20.0, 35.0, "20-35m"), (35.0, 1e9, "35m+")]
+
+
+def per_distance_counts(per_frame: List[List[FusedObject]],
+                        gt_per_frame: Sequence[np.ndarray],
+                        bins=DISTANCE_BINS,
+                        dist_thresh: float = 2.0) -> Dict[str, dict]:
+    """TP/FP/FN per BEV-range band (class-agnostic matching).
+
+    GT boxes are binned by their range for the recall side (``TP_gt`` / ``FN``);
+    predictions by their range for the precision side (``TP_pred`` / ``FP``).
+
+    Returns ``{band_label: {"TP_gt","FN","TP_pred","FP"}}``.
+    """
+    counts = {lab: {"TP_gt": 0, "FN": 0, "TP_pred": 0, "FP": 0} for _, _, lab in bins}
+
+    def band(r: float):
+        for lo, hi, lab in bins:
+            if lo <= r < hi:
+                return lab
+        return None
+
+    for objs, gt in zip(per_frame, gt_per_frame):
+        gt = _as_boxes(gt)
+        mo, mg = _match_frame(objs, gt, dist_thresh)
+        for g in range(len(gt)):
+            lab = band(float(np.linalg.norm(gt[g, :2])))
+            if lab is None:
+                continue
+            counts[lab]["TP_gt" if g in mg else "FN"] += 1
+        for i, o in enumerate(objs):
+            lab = band(float(np.linalg.norm(o.box[:2])))
+            if lab is None:
+                continue
+            counts[lab]["TP_pred" if i in mo else "FP"] += 1
+    return counts

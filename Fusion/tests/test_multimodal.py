@@ -190,6 +190,53 @@ def test_evaluate_distance_gate():
     assert m2["TP"] == 1 and m2["FP"] == 0 and m2["FN"] == 0
 
 
+# --------------------- per-class / per-distance metrics --------------------
+from src.late_fusion.multimodal import (  # noqa: E402
+    _gt_class_name, per_class_counts, per_distance_counts,
+)
+from src.late_fusion.types import NUSCENES_CLASSES  # noqa: E402
+
+
+def _obj_l(label, xy=(0, 0), track_id=1):
+    return FusedObject([xy[0], xy[1], 0, 1, 1, 1, 0], 0.5, label, {"lidar"},
+                       track_id=track_id)
+
+
+def test_gt_class_name_maps_index_and_name():
+    assert _gt_class_name(0, NUSCENES_CLASSES) == "car"
+    assert _gt_class_name("pedestrian", NUSCENES_CLASSES) == "pedestrian"
+    assert _gt_class_name(999, NUSCENES_CLASSES) is None   # out of range
+    assert _gt_class_name("nope", NUSCENES_CLASSES) is None
+
+
+def test_per_class_counts_class_aware():
+    # car GT detected as car (TP car); pedestrian GT detected as a car at the same
+    # spot (FP car + FN pedestrian, because matching is class-aware); a third car
+    # GT is missed (FN car).
+    car, ped = NUSCENES_CLASSES.index("car"), NUSCENES_CLASSES.index("pedestrian")
+    per_frame = [[_obj_l("car", (0, 0)), _obj_l("car", (10, 0))]]
+    gt = [np.array([[0, 0, 0, 4, 2, 1.5, 0],      # car  @ (0,0)   -> matched
+                    [10, 0, 0, 1, 1, 1.7, 0],     # ped  @ (10,0)  -> class mismatch
+                    [20, 0, 0, 4, 2, 1.5, 0]])]   # car  @ (20,0)  -> missed
+    gt_labels = [np.array([car, ped, car])]
+    c = per_class_counts(per_frame, gt, gt_labels)
+    assert c["car"] == {"TP": 1, "FP": 1, "FN": 1}
+    assert c["pedestrian"] == {"TP": 0, "FP": 0, "FN": 1}
+    assert c["truck"] == {"TP": 0, "FP": 0, "FN": 0}   # untouched class
+
+
+def test_per_distance_counts_bins_by_range():
+    # near match (TP), far GT missed (FN), far spurious prediction (FP).
+    per_frame = [[_obj_l("car", (5, 0)), _obj_l("car", (40, 0))]]
+    gt = [np.array([[5, 0, 0, 4, 2, 1.5, 0],       # near  -> matched
+                    [50, 0, 0, 4, 2, 1.5, 0]])]    # far   -> unmatched (>2 m away)
+    c = per_distance_counts(per_frame, gt)
+    assert c["0-20m"]["TP_gt"] == 1 and c["0-20m"]["TP_pred"] == 1
+    assert c["0-20m"]["FN"] == 0 and c["0-20m"]["FP"] == 0
+    assert c["35m+"]["FN"] == 1     # the 50 m GT is missed
+    assert c["35m+"]["FP"] == 1     # the 40 m prediction is spurious
+
+
 # ------------------------------- ablation ----------------------------------
 from src.late_fusion.multimodal import fuse_then_track_ablation  # noqa: E402
 
