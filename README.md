@@ -1,5 +1,9 @@
 # Multi-Modal Sensor Fusion for Autonomous Driving
 
+[![CI](https://github.com/jralbino/Sensor-fusion/actions/workflows/ci.yml/badge.svg)](https://github.com/jralbino/Sensor-fusion/actions/workflows/ci.yml)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 Multi-modal autonomous-driving perception system with four modules: **LiDAR** (3D detection + tracking), **Vision** (2D detection + lane segmentation + tracking), **Radar** (3D detection), and **Fusion** (LiDAR-to-camera projection **+ decision-level late fusion of LiDAR + camera + radar**). Uses NuScenes mini for 3D and BDD100K for 2D.
 
 Highlights:

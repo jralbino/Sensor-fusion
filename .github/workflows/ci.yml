@@ -1,0 +1,34 @@
+name: CI
+
+# Runs the dependency-free (pure CPU, no GPU / model weights / datasets) test
+# suites: the late-fusion core + the ByteTrack tracker. The per-module Vision /
+# Lidar / Radar suites need torch + model weights and are exercised in Docker.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install numpy scipy opencv-python-headless pytest
+
+      - name: Run CPU test suites
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest -q \
+            Fusion/tests/test_late_fusion.py \
+            Fusion/tests/test_multimodal.py \
+            Fusion/tests/test_lanes.py \
+            tracking/tests/test_bytetrack.py

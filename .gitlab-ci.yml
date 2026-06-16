@@ -1,0 +1,18 @@
+# GitLab CI mirror of .github/workflows/ci.yml — runs the pure-CPU test suites
+# (late-fusion core + ByteTrack). No GPU / model weights / datasets required.
+stages: [test]
+
+test:
+  stage: test
+  image: python:3.11
+  variables:
+    PYTHONPATH: "$CI_PROJECT_DIR"
+  before_script:
+    - pip install --quiet numpy scipy opencv-python-headless pytest
+  script:
+    - >
+      python -m pytest -q
+      Fusion/tests/test_late_fusion.py
+      Fusion/tests/test_multimodal.py
+      Fusion/tests/test_lanes.py
+      tracking/tests/test_bytetrack.py
