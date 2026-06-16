@@ -1,6 +1,11 @@
 # Multi-Modal Sensor Fusion for Autonomous Driving
 
-Multi-modal autonomous driving perception system with three modules: **LiDAR** (3D detection + tracking), **Vision** (2D detection + lane segmentation + tracking), and **Fusion** (LiDAR-to-camera projection). Uses NuScenes mini for 3D and BDD100K for 2D.
+Multi-modal autonomous-driving perception system with four modules: **LiDAR** (3D detection + tracking), **Vision** (2D detection + lane segmentation + tracking), **Radar** (3D detection), and **Fusion** (LiDAR-to-camera projection **+ decision-level late fusion of LiDAR + camera + radar**). Uses NuScenes mini for 3D and BDD100K for 2D.
+
+Highlights:
+- **Decision-level late fusion** combining LiDAR (3D geometry), camera (classification) and radar (velocity) in the bird's-eye-view frame — designed to run in **6 GB of GPU** where feature-level fusion (e.g. BEVFusion) does not fit. Three architectures (track-then-fuse, fuse-then-track, covariance-weighted central) are implemented, scored against NuScenes GT and rendered to video.
+- **Per-modality + cross-modality tracking** with a dependency-free ByteTrack (2D + 3D) shared across modules.
+- **Reproducible**: one Docker container per dependency stack, or per-module Python 3.11 venvs.
 
 ## Modules
 
@@ -29,7 +34,7 @@ Compares multiple SOTA detectors and lane models on BDD100K driving images.
 
 | Task | Models |
 |------|--------|
-| **Object Detection** | YOLO11 (L/X), RT-DETR (L, BDD-finetuned, people-finetuned) |
+| **Object Detection** | YOLO26 (L/X), YOLO11 (L/X), RT-DETR (X / L, BDD-finetuned, people-finetuned) |
 | **Lane Detection** | YOLOP (BDD100K pretrained), UFLD (CULane / TuSimple), PolyLaneNet |
 
 UFLD improvements: min-points filter + polynomial smoothing suppress spurious detections. UFLD (CULane) is recommended for BDD100K's diverse urban scenes.
@@ -54,9 +59,32 @@ Includes Streamlit app (`app.py`), CLI pipeline (`main.py`), NuScenes dataset lo
 
 See [Radar/README.md](Radar/README.md) for full details.
 
-### Fusion — LiDAR-Camera Projection
+### Fusion — Decision-Level Late Fusion (LiDAR + Camera + Radar)
 
-Projects LiDAR 3D points onto camera images using NuScenes calibration matrices (extrinsics + intrinsics). Demonstrates the spatial alignment between sensors.
+Two parts:
+
+1. **LiDAR → camera projection** (`src/lidar_to_camera.py`) — projects LiDAR 3D points onto camera images using NuScenes calibration (extrinsics + intrinsics), demonstrating cross-sensor spatial alignment.
+2. **Decision-level (late) fusion** (`src/late_fusion/`) — runs each sensor's own detector and combines the *detections* in the BEV frame, so it fits in 6 GB and reuses every existing detector. LiDAR provides the 3D boxes (anchors), camera confirms/refines the class (projection-IoU association), and radar supplies velocity / moving objects.
+
+Three fusion architectures are implemented and compared (`multimodal.py`):
+
+| Architecture | Idea |
+|---|---|
+| **A — track-then-fuse** | Track each modality independently (camera ×6, LiDAR, radar), then fuse the tracks |
+| **B — fuse-then-track** | Fuse all sensors' raw detections per frame, then track the fused result |
+| **C — cov-weighted central** | Like B, but principled: covariance-weighted radar/LiDAR position fusion (range-dependent noise) + Bayesian log-odds existence (radar down-weighted) — the literature-recommended setup |
+
+**Results** (NuScenes mini, scene 120, 41 frames; greedy BEV matching to GT, 2 m gate):
+
+| arch | recall | precision | F1 | tracks | mean track len | FP |
+|---|---|---|---|---|---|---|
+| A track-then-fuse | 0.51 | 0.82 | 0.63 | 133 | 11.1 | 260 |
+| B fuse-then-track | 0.50 | **0.85** | 0.63 | 118 | 11.9 | **216** |
+| C cov-weighted central | 0.51 | 0.84 | 0.63 | 118 | **12.2** | 233 |
+
+All three tie at **F1 = 0.63**; **B** gives the best precision / fewest false positives (fusing before tracking yields cleaner input), while **C** gives the best ID stability (longest tracks). 29 pure-NumPy unit tests cover the fusion core.
+
+Full method write-up in **[Fusion.md](Fusion.md)**; module usage in [Fusion/README.md](Fusion/README.md).
 
 ### Tracking — ByteTrack Multi-Object Tracking
 
@@ -150,7 +178,20 @@ Radar/venv/bin/python Radar/main.py \
 Radar/venv/bin/streamlit run Radar/app.py
 
 # --- Fusion ---
+# LiDAR -> camera projection
 Lidar/venv/bin/python Fusion/src/lidar_to_camera.py
+
+# Decision-level late fusion — A/B/C comparison (metrics table + 3-panel BEV video)
+docker compose run --rm fusion python Fusion/fusion_compare.py --start-idx 120 --num-frames 41
+
+# Per-modality + per-architecture fusion videos
+docker compose run --rm fusion python Fusion/fusion_video.py --start-idx 120 --num-frames 41
+
+# Data-driven scene reconstruction / simulation
+docker compose run --rm fusion python Fusion/simulation_video.py --start-idx 120 --num-frames 41
+
+# Fusion unit tests (29, pure NumPy)
+docker compose run --rm fusion python -m pytest Fusion/tests/ -v
 
 # --- Tests ---
 Lidar/venv/bin/python -m pytest tracking/tests/ -v   # 22 tracking tests
@@ -187,8 +228,14 @@ Sensor-fusion/
 │   ├── main.py             # CLI detection pipeline
 │   ├── src/                # CFAR+DBSCAN, RadarPillars, RadarCenterPoint
 │   └── tests/              # 59 unit tests
-├── Fusion/                 # LiDAR-camera projection
-│   └── src/lidar_to_camera.py
+├── Fusion/                 # LiDAR-camera projection + decision-level late fusion
+│   ├── src/lidar_to_camera.py   # LiDAR -> camera projection
+│   ├── src/late_fusion/    # Late fusion core (types/geometry/association/fusion/multimodal)
+│   ├── fusion_compare.py   # A/B/C comparison (metrics + 3-panel BEV video)
+│   ├── fusion_video.py     # Per-modality + per-architecture videos
+│   ├── simulation_video.py # Data-driven scene reconstruction
+│   ├── tests/              # 29 fusion unit tests
+│   └── Fusion.md (root)    # Full method write-up + results
 ├── tracking/               # ByteTrack MOT (shared by Lidar + Vision)
 │   ├── bytetrack.py        # Core two-threshold association + Hungarian matching
 │   ├── kalman_2d.py        # 2D Kalman filter (8-dim state)
@@ -199,5 +246,8 @@ Sensor-fusion/
 ├── config/                 # Centralized path management
 │   ├── config.yaml         # All paths + model filenames
 │   └── utils/path_manager.py  # PathManager singleton
+├── docker/                 # Per-stack Dockerfiles + docker-compose.yml
+├── Fusion.md               # Late-fusion method write-up + results
+├── LICENSE                 # MIT
 └── README.md
 ```
