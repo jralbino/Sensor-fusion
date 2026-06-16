@@ -155,6 +155,28 @@ def fuse_then_track(results: Sequence[dict], **fuse_kw) -> List[List[FusedObject
     return per_frame
 
 
+def fuse_then_track_ablation(results: Sequence[dict], use_camera: bool = True,
+                             use_radar: bool = True, **fuse_kw) -> List[List[FusedObject]]:
+    """Architecture B restricted to a subset of sensors, for ablation.
+
+    Always uses LiDAR as the 3D anchor; ``use_camera``/``use_radar`` toggle whether
+    the camera and radar detections are made available to ``fuse``. With both False
+    this is the LiDAR-only baseline (each LiDAR detection tracked); enabling them one
+    at a time measures each modality's marginal contribution.
+    """
+    BaseTrack.reset_id_counter()
+    tracker = make_tracker("fused")
+    per_frame = []
+    for r in results:
+        sd = r["sample_data"]
+        cam = r["cam_dets"] if use_camera else []
+        radar = r["radar_dets"] if use_radar else []
+        fused = fuse(r["lidar_dets"], cam, radar, sd["cameras"],
+                     include_radar_only=use_radar, **fuse_kw)
+        per_frame.append(_assign_ids_3d(fused, tracker, sd["lidar_to_global"]))
+    return per_frame
+
+
 def track_then_fuse(results: Sequence[dict], **fuse_kw) -> List[List[FusedObject]]:
     """Architecture A: track each modality, then fuse the per-modality tracks."""
     BaseTrack.reset_id_counter()

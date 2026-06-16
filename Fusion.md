@@ -151,29 +151,46 @@ Like B (single fusion stage, then track) but the fusion is principled (`fuse_cov
 
 All three pass through the `confirm_filter` (Section 3) for false-positive removal.
 
-### Which is better?
-`fusion_compare.py` runs all three and `evaluate` scores each against NuScenes GT
-(greedy BEV matching, 2 m): recall / precision / F1 + ID-stability (track count, mean
-track length). On scene 120 (41 frames, GT avg 58 obj/frame; results saved to
-`outputs/compare/metrics_s120_41f.txt`):
+### Does fusion help? (ablation)
+`fusion_evaluate.py` adds one modality at a time to the same fuse-then-track
+pipeline, scored over **all 10 NuScenes-mini scenes (404 frames)**, mean±std across
+scenes (greedy BEV matching, 2 m; results in `outputs/eval/ablation_multiscene_10scenes.txt`):
 
-| arch | recall | precision | F1 | tracks | meanLen | FP |
+| config | recall | precision | F1 | ΔF1 (pooled, vs LiDAR-only) |
+|---|---|---|---|---|
+| LiDAR-only | 0.42±0.13 | 0.72±0.15 | 0.51±0.12 | base |
+| + Camera | 0.43±0.12 | 0.72±0.14 | 0.52±0.11 | +0.007 |
+| + Camera + Radar | 0.44±0.11 | 0.70±0.15 | 0.52±0.10 | +0.006 |
+
+**Honest finding:** the official LiDAR detector is already strong, so on F1 the gains
+are **small**. The camera adds a little **recall** (and refines class/score) at no
+precision cost; radar adds a touch more recall but costs a little precision (classical
+CFAR+DBSCAN is noisy), so net F1 is flat. Fusion's real value here is the **extra
+recall, class refinement, and velocity** it contributes — not captured by a single
+class-agnostic F1. A learned radar detector and per-class metrics (see §9) would likely
+widen the camera/radar margins.
+
+### Which architecture is better?
+Same 10-scene protocol, mean±std (+ pooled micro-F1):
+
+| arch | recall | precision | F1 | tracks | meanLen | micro-F1 |
 |---|---|---|---|---|---|---|
-| A track-then-fuse | **0.51** | 0.82 | 0.63 | 133 | 11.1 | 260 |
-| B fuse-then-track | 0.50 | **0.85** | 0.63 | **118** | 11.9 | **216** |
-| C cov-weighted central | **0.51** | 0.84 | 0.63 | **118** | **12.2** | 233 |
+| **A track-then-fuse** | **0.49±0.12** | 0.63±0.16 | 0.53±0.10 | 102±38 | 13.0±3.6 | **0.551** |
+| B fuse-then-track | 0.44±0.11 | **0.70±0.15** | 0.52±0.10 | **74±28** | 14.7±4.5 | 0.528 |
+| C cov-weighted central | 0.47±0.13 | 0.68±0.15 | **0.54±0.10** | 80±28 | **14.3±3.9** | 0.541 |
 
-**All three tie at F1 = 0.63**; they differ in the precision/recall trade-off and ID
-stability. **B** (fuse-then-track) gives the highest precision and fewest false
-positives: fusing first removes spurious detections (via multi-sensor confirmation)
-*before* tracking, so the tracker sees cleaner input, whereas A tracks each noisy
-modality independently and propagates its false positives (most FP, most tracks).
-**C** keeps B's fuse-then-track structure but replaces the heuristic fusion with
-covariance-weighted position fusion and Bayesian-log-odds existence (radar
-down-weighted) — the literature-recommended setup — and gives the best ID stability
-(longest mean track length) at near-B precision; it is the method driven in
-`simulation_video.py`. All three are kept in `fusion_compare.py` (which prints the
-full TP/FP/FN + F1 table and picks the best by F1) for testing on more sequences.
+**This reverses the single-scene impression** (where B looked best) — a key reason to
+evaluate on many scenes. Across all 10 it is a **precision/recall trade-off**, not a
+clear winner:
+- **A** maximises **recall / micro-F1** but emits the most tracks (noisier, more FP).
+- **B** maximises **precision** with the fewest, cleanest tracks (fusing before
+  tracking suppresses spurious detections), at the cost of recall.
+- **C** is the best **balance**: top macro-F1 with both good recall and precision, and
+  the principled covariance/Bayesian fusion — a sensible default; it drives
+  `simulation_video.py`.
+
+Single-scene tables (scene 120) live in `outputs/compare/metrics_s120_41f.txt` via
+`fusion_compare.py`; the robust multi-scene numbers above come from `fusion_evaluate.py`.
 
 ---
 
@@ -197,8 +214,12 @@ docker compose run --rm fusion python Fusion/fusion_video.py --start-idx 120 --n
 #   modality_camera_*, modality_lidar_*, modality_radar_*   (Section 3)
 #   fusionA_final_*  (A, Section 6)   fusionB_single_*  (B, Section 6)
 
-# A/B/C comparison (metrics table + 3-panel BEV video):
+# A/B/C comparison on ONE scene (metrics table + 3-panel BEV video):
 docker compose run --rm fusion python Fusion/fusion_compare.py --start-idx 120 --num-frames 41
+
+# Multi-scene evaluation + sensor ablation (ALL 10 mini scenes; no video):
+docker compose run --rm fusion python Fusion/fusion_evaluate.py
+#   --max-scenes 3   quick subset   |   --scenes 3,4   pick scenes by number
 
 # Data-driven scene reconstruction / simulation (global map + ego + agents, LiDAR-style):
 docker compose run --rm fusion python Fusion/simulation_video.py --start-idx 120 --num-frames 41
@@ -221,7 +242,12 @@ frame so frame size stays constant.
   classification.
 - **Camera** tracks are per-camera (a car in two overlapping views can get two IDs);
   true cross-camera identity fusion would need 3D lifting or overlap association.
-- Evaluated only on NuScenes mini; full `v1.0-trainval` val needed for benchmark-grade
-  numbers.
-- Next: consolidate B as the main pipeline, a Streamlit fusion app, and BEVFusion
-  (feature-level) in the `mmdet3d` container on a larger GPU.
+- Evaluated on all 10 NuScenes-**mini** scenes (404 frames, `fusion_evaluate.py`); the
+  full `v1.0-trainval` val split is still needed for benchmark-grade numbers.
+- The ablation shows camera/radar add little to a single class-agnostic F1. **Per-class
+  + distance-stratified metrics and a velocity (AVE) metric** would expose where each
+  modality actually helps (small/distant objects, moving objects).
+- A **learned radar detector** (replacing CFAR+DBSCAN) would likely turn radar's small
+  net contribution positive.
+- Next: a Streamlit fusion app, and BEVFusion (feature-level) in the `mmdet3d` container
+  on a larger GPU as a late-vs-feature-level comparison point.

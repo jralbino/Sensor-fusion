@@ -92,7 +92,7 @@ One container per dependency stack; repo + datasets are bind-mounted. Full refer
 
 ### Late Fusion Pipeline (`Fusion/src/late_fusion/`)
 - LiDAR-anchored decision-level fusion: LiDAR 3D boxes + camera 2D (projection-IoU association, class refinement) + radar (velocity / moving objects)
-- Pure-NumPy core (types/geometry/association/fusion + the A/B/C `multimodal` architectures) with 29 unit tests (`tests/test_late_fusion.py` + `tests/test_multimodal.py`); `pipeline.py` orchestrates the real detectors via `module_loader`
+- Pure-NumPy core (types/geometry/association/fusion + the A/B/C `multimodal` architectures + ablation) with 32 unit tests (`tests/test_late_fusion.py` + `tests/test_multimodal.py`); `pipeline.py` orchestrates the real detectors via `module_loader`. Multi-scene eval + ablation in `fusion_evaluate.py`
 
 ### Configuration
 All paths flow through `config/config.yaml` → `config/utils/path_manager.py` (PathManager singleton). Paths are relative to project root.

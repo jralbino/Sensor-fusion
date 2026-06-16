@@ -79,15 +79,25 @@ Three fusion architectures are implemented and compared (`multimodal.py`):
 | **B — fuse-then-track** | Fuse all sensors' raw detections per frame, then track the fused result |
 | **C — cov-weighted central** | Like B, but principled: covariance-weighted radar/LiDAR position fusion (range-dependent noise) + Bayesian log-odds existence (radar down-weighted) — the literature-recommended setup |
 
-**Results** (NuScenes mini, scene 120, 41 frames; greedy BEV matching to GT, 2 m gate):
+**Does fusion help? — ablation** over all 10 NuScenes-mini scenes (404 frames, mean±std; greedy BEV matching to GT, 2 m gate):
 
-| arch | recall | precision | F1 | tracks | mean track len | FP |
-|---|---|---|---|---|---|---|
-| A track-then-fuse | 0.51 | 0.82 | 0.63 | 133 | 11.1 | 260 |
-| B fuse-then-track | 0.50 | **0.85** | 0.63 | 118 | 11.9 | **216** |
-| C cov-weighted central | 0.51 | 0.84 | 0.63 | 118 | **12.2** | 233 |
+| config | recall | precision | F1 | ΔF1 vs LiDAR-only |
+|---|---|---|---|---|
+| LiDAR-only | 0.42±0.13 | 0.72±0.15 | 0.51±0.12 | base |
+| + Camera | 0.43±0.12 | 0.72±0.14 | 0.52±0.11 | +0.007 |
+| + Camera + Radar | 0.44±0.11 | 0.70±0.15 | 0.52±0.10 | +0.006 |
 
-All three tie at **F1 = 0.63**; **B** gives the best precision / fewest false positives (fusing before tracking yields cleaner input), while **C** gives the best ID stability (longest tracks). 29 pure-NumPy unit tests cover the fusion core.
+The official LiDAR detector is already strong, so the gains on a single class-agnostic F1 are small — camera adds **recall** + class refinement at no precision cost; classical radar adds a little recall but costs some precision. Fusion's real value here is the extra recall, class refinement and **velocity** (a learned radar detector + per-class metrics would widen the margins — see roadmap).
+
+**Architecture comparison** (same 10-scene protocol, mean±std + pooled micro-F1):
+
+| arch | recall | precision | F1 | tracks | micro-F1 |
+|---|---|---|---|---|---|
+| **A track-then-fuse** | **0.49** | 0.63 | 0.53 | 102 | **0.551** |
+| B fuse-then-track | 0.44 | **0.70** | 0.52 | **74** | 0.528 |
+| C cov-weighted central | 0.47 | 0.68 | **0.54** | 80 | 0.541 |
+
+A precision/recall trade-off, not a single winner: **A** maximises recall/micro-F1 (but noisiest), **B** maximises precision with the cleanest tracks, **C** is the best balance (top macro-F1) and a sensible default. *(Evaluating across many scenes flipped the single-scene impression that B won — exactly why the multi-scene protocol matters.)* 32 pure-NumPy unit tests cover the fusion core.
 
 <p align="center">
   <img src="assets/fusion_abc.gif" width="95%" alt="Side-by-side BEV of the three fusion architectures A | B | C vs ground truth"><br>
@@ -249,7 +259,8 @@ Sensor-fusion/
 │   ├── fusion_compare.py   # A/B/C comparison (metrics + 3-panel BEV video)
 │   ├── fusion_video.py     # Per-modality + per-architecture videos
 │   ├── simulation_video.py # Data-driven scene reconstruction
-│   ├── tests/              # 29 fusion unit tests
+│   ├── fusion_evaluate.py  # Multi-scene evaluation + sensor ablation
+│   ├── tests/              # 32 fusion unit tests
 │   └── Fusion.md (root)    # Full method write-up + results
 ├── tracking/               # ByteTrack MOT (shared by Lidar + Vision)
 │   ├── bytetrack.py        # Core two-threshold association + Hungarian matching

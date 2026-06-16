@@ -188,3 +188,63 @@ def test_evaluate_distance_gate():
     # Within the gate it matches.
     m2 = evaluate(per_frame, gt, dist_thresh=3.0)
     assert m2["TP"] == 1 and m2["FP"] == 0 and m2["FN"] == 0
+
+
+# ------------------------------- ablation ----------------------------------
+from src.late_fusion.multimodal import fuse_then_track_ablation  # noqa: E402
+
+
+def _scene(n_frames=5):
+    """A tiny scene: one static car seen by LiDAR + camera + radar every frame."""
+    cams = _front_camera()
+    cam = cams["CAM_FRONT"]
+    box = [10, 0, 0, 4, 2, 1.5, 0]
+    bbox = project_box_to_image(boxes_to_corners_3d(box), cam["lidar_to_cam"],
+                                cam["intrinsic"], cam["img_w"], cam["img_h"])
+    results = []
+    for i in range(n_frames):
+        results.append({
+            "index": i,
+            "lidar_dets": [Detection3D(box, 0.6, "car", "lidar")],
+            "cam_dets": [Detection2D(bbox, 0.9, "car", "CAM_FRONT")],
+            "radar_dets": [Detection3D([10, 0, 0, 1, 1, 1, 0], 0.5, "car", "radar", [3.0, 0.0])],
+            "sample_data": {"cameras": cams, "lidar_to_global": np.eye(4)},
+        })
+    return results
+
+
+def _sources_union(per_frame):
+    u = set()
+    for objs in per_frame:
+        for o in objs:
+            u |= o.sources
+    return u
+
+
+def test_ablation_lidar_only_has_no_other_sources():
+    pf = fuse_then_track_ablation(_scene(), use_camera=False, use_radar=False)
+    assert any(objs for objs in pf)                 # the car is tracked
+    assert _sources_union(pf) == {"lidar"}          # no camera/radar leaked in
+
+
+def test_ablation_progressively_adds_modalities():
+    cam = fuse_then_track_ablation(_scene(), use_camera=True, use_radar=False)
+    full = fuse_then_track_ablation(_scene(), use_camera=True, use_radar=True)
+    assert "camera" in _sources_union(cam) and "radar" not in _sources_union(cam)
+    assert {"lidar", "camera", "radar"} <= _sources_union(full)
+
+
+def test_aggregate_mean_std_and_micro():
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from fusion_evaluate import aggregate
+
+    m = [{"f1": 0.4, "TP": 2, "FP": 1, "FN": 2},
+         {"f1": 0.6, "TP": 4, "FP": 1, "FN": 0}]
+    a = aggregate(m, ["f1"])
+    assert a["f1"][0] == pytest.approx(0.5)         # mean
+    assert a["f1"][1] == pytest.approx(0.1)         # std
+    # pooled micro: TP=6, FP=2, FN=2 -> P=0.75, R=0.75, F1=0.75
+    assert a["_micro"]["precision"] == pytest.approx(0.75)
+    assert a["_micro"]["f1"] == pytest.approx(0.75)
